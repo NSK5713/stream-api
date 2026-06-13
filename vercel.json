@@ -1,0 +1,10 @@
+{
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "framework": null,
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60
+    }
+  }
+}

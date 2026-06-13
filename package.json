@@ -1,0 +1,24 @@
+{
+  "name": "nskanime-stream-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/server.js"
+  },
+  "dependencies": {
+    "@consumet/extensions": "^1.8.8",
+    "axios": "^1.16.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^6.0.3"
+  }
+}
