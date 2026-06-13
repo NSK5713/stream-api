@@ -8,6 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@consumet/extensions": "^1.8.8",
     "axios": "^1.16.1",
