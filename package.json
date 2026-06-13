@@ -2,9 +2,11 @@
   "name": "nskanime-stream-api",
   "version": "0.1.0",
   "main": "dist/server.js",
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/server.js"
+"scripts": {
+  "install": "npm ci",
+  "build": "npx tsc",
+  "start": "node dist/server.js"
+}
   },
   "engines": {
     "node": ">=20"
