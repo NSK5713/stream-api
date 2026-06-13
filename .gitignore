@@ -2,3 +2,6 @@
 dist/
 test-allanime*.mjs
 test-provider-chain.ts
+node modules
+dist
+.env

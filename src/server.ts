@@ -1,3 +1,5 @@
+console.log("🔥 SERVER STARTING...");
+console.log("PORT:", process.env.PORT);
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 
