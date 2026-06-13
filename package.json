@@ -3,11 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "commonjs",
-  "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "echo \"no build step needed\"",
-    "start": "tsx src/server.ts"
-  },
+"scripts": {
+  "dev": "tsx watch src/server.ts",
+  "start": "tsx src/server.ts"
+},
   "engines": {
     "node": ">=20"
   },
