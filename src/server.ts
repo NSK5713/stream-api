@@ -1,5 +1,6 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+
 import { animeRouter } from "./routes/anime";
 import { healthRouter } from "./routes/health";
 import { proxyRouter } from "./routes/proxy";
@@ -20,13 +21,19 @@ app.use(
     origin: allowedOrigins.includes("*") ? true : allowedOrigins,
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    exposedHeaders: ["Content-Length", "Content-Range", "Accept-Ranges", "X-NSKAnime-Cache", "Retry-After"],
-  }),
+    exposedHeaders: [
+      "Content-Length",
+      "Content-Range",
+      "Accept-Ranges",
+      "X-NSKAnime-Cache",
+      "Retry-After",
+    ],
+  })
 );
 
 app.use(express.json({ limit: "1mb" }));
 
-app.get("/", (_req, res) => {
+app.get("/", (_req: Request, res: Response) => {
   res.status(200).json({ ok: true, service: "nskanime-stream-api" });
 });
 
@@ -37,16 +44,20 @@ app.use("/api/skip-times", skipTimesRouter);
 app.use("/api/anilist", anilistRouter);
 app.use("/api/library", libraryRouter);
 
-app.use((_req, res) => {
+app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "Not found" });
 });
 
-app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("Unhandled route error:", error);
-  res.status(500).json({
-    error: error instanceof Error ? error.message : "Internal server error",
-  });
-});
+// IMPORTANT: proper Express error handler signature
+app.use(
+  (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error("Unhandled route error:", error);
+
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Internal server error",
+    });
+  }
+);
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`NSKAnime stream API listening on http://0.0.0.0:${port}`);
