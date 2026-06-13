@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
-import { kvGetJson, kvSetJson, streamCacheConfigured } from "../../lib/kv-cache";
+import { kvGetJson, kvSetJson, streamCacheConfigured } from "../lib/kv-cache";
 
 type LibraryBackup = {
   version: 1;

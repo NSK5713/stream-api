@@ -41,6 +41,13 @@ app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled route error:", error);
+  res.status(500).json({
+    error: error instanceof Error ? error.message : "Internal server error",
+  });
+});
+
 app.listen(port, "0.0.0.0", () => {
   console.log(`NSKAnime stream API listening on http://0.0.0.0:${port}`);
 });

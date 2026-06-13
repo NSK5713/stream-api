@@ -1,4 +1,4 @@
-import { allanimeProvider, decryptAllAnimePayload } from "../lib/allanime-provider";
+import { allanimeProvider, decryptAllAnimePayload } from "../src/lib/allanime-provider";
 
 const ALLANIME_REFERER = "https://youtu-chan.com";
 const ALLANIME_API = "https://api.allanime.day/api";

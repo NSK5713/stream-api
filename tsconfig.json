@@ -5,12 +5,12 @@
     "moduleResolution": "node",
     "ignoreDeprecations": "6.0",
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "src",
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "lib/**/*.ts"],
-  "exclude": ["node_modules", "dist", "scripts", "api"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "scripts"]
 }

@@ -1,5 +1,5 @@
-import { streamProvider, type StreamCategory } from "../../lib/provider";
-import { STREAM_CACHE_TTL } from "../../lib/kv-cache";
+import { streamProvider, type StreamCategory } from "../lib/provider";
+import { STREAM_CACHE_TTL } from "../lib/kv-cache";
 
 export { STREAM_CACHE_TTL };
 

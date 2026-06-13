@@ -1,5 +1,5 @@
 import { ANIME } from "@consumet/extensions";
-import { allanimeProvider } from "../lib/allanime-provider";
+import { allanimeProvider } from "../src/lib/allanime-provider";
 
 async function main() {
   console.log("=== HiAnime ===");

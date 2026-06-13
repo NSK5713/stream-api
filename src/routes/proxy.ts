@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Readable } from "node:stream";
-import { isAllowedProxyRequest } from "../../lib/proxy-allowlist";
+import { isAllowedProxyRequest } from "../lib/proxy-allowlist";
 
 export const proxyRouter = Router();
 

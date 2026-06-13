@@ -1,6 +1,6 @@
-import { allanimeProvider } from "../lib/allanime-provider";
-import { scoreProviderTitleMatch } from "../lib/provider-match-utils";
-import { consumetMultiProvider } from "../lib/provider-chain";
+import { allanimeProvider } from "../src/lib/allanime-provider";
+import { scoreProviderTitleMatch } from "../src/lib/provider-match-utils";
+import { consumetMultiProvider } from "../src/lib/provider-chain";
 
 const ZERO_QUERIES = [
   "No Game No Life Zero",

@@ -3,7 +3,7 @@ import {
   activeStreamProviderMode,
   ensureProviderConfigured,
   streamProviderCacheEnabled,
-} from "../../lib/provider";
+} from "../lib/provider";
 
 export const healthRouter = Router();
 

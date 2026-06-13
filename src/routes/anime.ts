@@ -1,6 +1,6 @@
 import { Router } from "express";
-import type { StreamCategory } from "../../lib/provider";
-import { setHttpCacheControl, STREAM_CACHE_TTL } from "../../lib/kv-cache";
+import type { StreamCategory } from "../lib/provider";
+import { setHttpCacheControl, STREAM_CACHE_TTL } from "../lib/kv-cache";
 import {
   getAnimeInfo,
   getEpisodeServers,
