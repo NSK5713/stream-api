@@ -1,7 +1,4 @@
-.vercel
-dist/
-test-allanime*.mjs
-test-provider-chain.ts
-node modules
+node_modules
 dist
+package-lock.json
 .env
