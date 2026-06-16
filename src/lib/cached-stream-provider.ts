@@ -1,3 +1,4 @@
+import type { EpisodeId } from "../types/episode";
 import type { StreamCategory } from "./provider";
 import {
   getOrSetCached,
@@ -10,8 +11,8 @@ type EpisodesOptions = { searchHints?: string[] };
 type StreamProviderLike = {
   search(query: string): Promise<unknown>;
   episodes(animeId: string, options?: EpisodesOptions): Promise<unknown>;
-  servers(episodeId: string, category?: StreamCategory): Promise<unknown>;
-  sources(episodeId: string, server: string, category: StreamCategory): Promise<unknown>;
+  servers(episodeId: EpisodeId, category?: StreamCategory): Promise<unknown>;
+  sources(episodeId: EpisodeId, server: string, category: StreamCategory): Promise<unknown>;
 };
 
 function normalizeQuery(query: string): string {
@@ -43,14 +44,14 @@ export function wrapStreamProviderWithCache<T extends StreamProviderLike>(provid
         (entry) => entry.value,
       );
     },
-    servers(episodeId: string, category?: StreamCategory) {
+    servers(episodeId: EpisodeId, category?: StreamCategory) {
       const key = streamCacheKey("servers", [episodeId, category ?? "sub"]);
       return getOrSetCached(key, STREAM_CACHE_TTL.servers, () => provider.servers(episodeId, category)).then(
         (entry) => entry.value,
       );
     },
     /** Signed stream URLs expire quickly — never cache sources in Redis. */
-    sources(episodeId: string, server: string, category: StreamCategory) {
+    sources(episodeId: EpisodeId, server: string, category: StreamCategory) {
       return provider.sources(episodeId, server, category);
     },
   } as T;

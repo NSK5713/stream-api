@@ -1,37 +1,62 @@
 import { streamProvider, type StreamCategory } from "../lib/provider";
-import { STREAM_CACHE_TTL } from "../lib/kv-cache";
+import type { EpisodeId } from "../types/episode";
 
-export { STREAM_CACHE_TTL };
+type SafeProviderResponse = {
+  results?: any[];
+  animes?: any[];
+  data?: any[];
+};
 
+function safeArray(data: any): any[] {
+  if (!data) return [];
+  return data.results || data.animes || data.data || [];
+}
+
+/* ---------------- SEARCH ---------------- */
 export async function searchAnime(query: string) {
-  const data = (await streamProvider.search(query)) as {
-    results?: unknown[];
-    animes?: unknown[];
-    data?: unknown[];
-  };
-  return data.results ?? data.animes ?? data.data ?? [];
+  try {
+    const res = (await streamProvider.search(query)) as SafeProviderResponse;
+    return safeArray(res);
+  } catch {
+    return [];
+  }
 }
 
-export async function getAnimeInfo(animeId: string, searchHints: string[] = []) {
-  const data = (await streamProvider.episodes(animeId, { searchHints })) as {
-    episodes?: unknown[];
-    data?: unknown[];
-  };
-  return data.episodes ?? data.data ?? [];
+/* ---------------- EPISODES ---------------- */
+export async function getAnimeInfo(animeId: string) {
+  try {
+    const res = await streamProvider.episodes(animeId);
+    return (res as any)?.episodes ?? (res as any)?.data ?? [];
+  } catch (err) {
+    console.error("getAnimeInfo error:", err);
+    return [];
+  }
 }
 
-export async function getEpisodeServers(episodeId: string) {
-  const data = (await streamProvider.servers(episodeId)) as {
-    servers?: unknown[];
-    data?: unknown[];
-  };
-  return data.servers ?? data.data ?? [];
+/* ---------------- SERVERS ---------------- */
+export async function getEpisodeServers(episodeId: EpisodeId) {
+  try {
+    return await streamProvider.servers(episodeId);
+  } catch (err) {
+    console.error("getEpisodeServers error:", err);
+    return { servers: [] };
+  }
 }
 
+/* ---------------- SOURCES ---------------- */
 export async function getEpisodeWatchSources(
-  episodeId: string,
+  episodeId: EpisodeId,
   server: string,
   category: StreamCategory,
 ) {
-  return streamProvider.sources(episodeId, server, category);
+  try {
+    return await streamProvider.sources(
+      episodeId,
+      server,
+      category,
+    );
+  } catch (err) {
+    console.error("getEpisodeWatchSources error:", err);
+    return { sources: [] };
+  }
 }

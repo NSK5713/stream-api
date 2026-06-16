@@ -41,6 +41,7 @@ export type EpisodeSourcesResponse = {
   skip?: ProviderSkipTimes | null;
 };
 
+
 const providerBaseUrl = (process.env.STREAM_PROVIDER_BASE_URL || "").replace(/\/$/, "");
 
 export type StreamProviderMode = "consumet-multi" | "consumet-hianime" | "proxy";
@@ -72,26 +73,29 @@ async function proxyRequest<T>(path: string): Promise<T> {
 
 const proxyStreamProvider = {
   search(query: string) {
-    return proxyRequest<{ results?: ProviderAnime[]; animes?: ProviderAnime[]; data?: ProviderAnime[] }>(
-      `/api/anime/search?q=${encodeURIComponent(query)}`,
-    );
+    return proxyRequest(`/api/anime/search?q=${encodeURIComponent(query)}`);
   },
+
   episodes(animeId: string) {
-    return proxyRequest<{ episodes?: ProviderEpisode[]; data?: ProviderEpisode[] }>(
-      `/api/anime/info?id=${encodeURIComponent(animeId)}`,
-    );
+    return proxyRequest(`/api/anime/info?id=${encodeURIComponent(animeId)}`);
   },
+
   servers(episodeId: string) {
-    return proxyRequest<{ servers?: EpisodeServer[]; data?: EpisodeServer[] }>(
-      `/api/anime/watch?episodeId=${encodeURIComponent(episodeId)}`,
-    );
+    return proxyRequest(`/api/anime/servers?episodeId=${encodeURIComponent(episodeId)}`);
   },
+
   sources(episodeId: string, server: string, category: StreamCategory) {
-    const params = new URLSearchParams({ episodeId, server, category });
-    return proxyRequest<EpisodeSourcesResponse>(`/api/anime/watch?${params.toString()}`);
+    const params = new URLSearchParams({
+      episodeId,
+      server,
+      category,
+    });
+
+    return proxyRequest<EpisodeSourcesResponse>(
+      `/api/anime/sources?${params.toString()}`
+    );
   },
 };
-
 const providerMode = resolveStreamProviderMode();
 
 const builtInProvider =
@@ -100,6 +104,19 @@ const builtInProvider =
 const rawStreamProvider = providerMode === "proxy" ? proxyStreamProvider : builtInProvider;
 
 export const streamProvider = wrapStreamProviderWithCache(rawStreamProvider);
+import { getCache, setCache } from "./cache";
+
+function withCache<T>(key: string, fn: () => Promise<T>, ttl = 60) {
+  return async () => {
+    const cached = getCache<T>(key);
+    if (cached) return cached;
+
+    const result = await fn();
+    setCache(key, result, ttl);
+
+    return result;
+  };
+}
 
 export const activeStreamProviderMode = providerMode;
 export const streamProviderCacheEnabled = streamCacheConfigured();

@@ -1,4 +1,5 @@
 import { ANIME, StreamingServers, SubOrSub } from "@consumet/extensions";
+import type { EpisodeId } from "../types/episode";
 import type {
   EpisodeServer,
   EpisodeSourcesResponse,
@@ -88,11 +89,11 @@ export const consumetHianimeProvider = {
     return { episodes };
   },
 
-  async servers(_episodeId: string) {
+  async servers(_episodeId: EpisodeId) {
     return { servers: buildServers() };
   },
 
-  async sources(episodeId: string, server: string, category: StreamCategory): Promise<EpisodeSourcesResponse> {
+  async sources(episodeId: EpisodeId, server: string, category: StreamCategory): Promise<EpisodeSourcesResponse> {
     const [result, ajaxSkip] = await Promise.all([
       withTimeout(
         hianime.fetchEpisodeSources(episodeId, mapServer(server), mapCategory(category)),

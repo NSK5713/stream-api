@@ -15,6 +15,7 @@ import {
   withTimeout,
 } from "./consumet-providers";
 import { fetchHianimeProviderSkip, type ProviderSkipTimes } from "./provider-skip";
+import type { EpisodeId } from "../types/episode";
 import type {
   EpisodeServer,
   EpisodeSourcesResponse,
@@ -283,7 +284,7 @@ export const consumetMultiProvider = {
     return adapter.episodes(id);
   },
 
-  async servers(episodeId: string) {
+  async servers(episodeId: EpisodeId) {
     if (isAllAnimeId(episodeId)) {
       const rawEpisodeId = stripProviderPrefix(episodeId).id;
       const data = await withTimeout(allanimeProvider.servers(rawEpisodeId), "AllAnime servers", 12_000);
@@ -301,7 +302,7 @@ export const consumetMultiProvider = {
     return adapter.servers(id, "sub");
   },
 
-  async sources(episodeId: string, server: string, category: StreamCategory): Promise<EpisodeSourcesResponse> {
+  async sources(episodeId: EpisodeId, server: string, category: StreamCategory): Promise<EpisodeSourcesResponse> {
     if (isAllAnimeId(episodeId)) {
       const rawEpisodeId = stripProviderPrefix(episodeId).id;
       try {

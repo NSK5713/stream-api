@@ -112,9 +112,9 @@ export function setHttpCacheControl(res: { setHeader: (name: string, value: stri
 
 /** TTLs (seconds) — sources expire quickly; search/episodes are stable longer. */
 export const STREAM_CACHE_TTL = {
-  search: 6 * 60 * 60,
-  episodes: 6 * 60 * 60,
+  search: 10 * 60,
+  episodes: 60 * 60,
   servers: 60 * 60,
   /** Short CDN cache only — playback URLs are time-limited. */
-  sources: 90,
+  sources: 30 * 60,
 } as const;
