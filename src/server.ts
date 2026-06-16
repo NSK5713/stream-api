@@ -56,7 +56,10 @@ function findAvailablePort(startPort: number): Promise<number> {
 // SERVER START
 // -----------------------------
 async function startServer() {
-  const port = await findAvailablePort(DEFAULT_PORT);
+  // Railway and other PaaS set PORT — bind exactly (no port scan).
+  const port = process.env.PORT
+    ? Number(process.env.PORT)
+    : await findAvailablePort(DEFAULT_PORT);
 
   const server = app.listen(port, () => {
     console.log("🔥 SERVER STARTED");
