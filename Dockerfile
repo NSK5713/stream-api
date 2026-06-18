@@ -1,11 +1,10 @@
-# Optional — Railway uses railpack/nixpacks by default; use this with builder = "DOCKERFILE"
+# Optional Docker deploy — matches src/ → dist/server.js layout
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
-COPY lib ./lib
 RUN npm run build
 
 FROM node:22-alpine AS runtime
@@ -15,4 +14,4 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 EXPOSE 3003
-CMD ["node", "dist/src/server.js"]
+CMD ["node", "dist/server.js"]
