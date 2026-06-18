@@ -1,15 +1,23 @@
 # Stream API (Express)
 
-Standalone Node.js Express server for anime streaming provider routes (`@consumet/extensions`).
+Standalone Node.js Express server for NSKAnime streaming (`consumet-multi` + AllAnime).
 
-| What | URL (local) |
-|------|-------------|
-| Health | http://127.0.0.1:3000/api/health |
-| Search | http://127.0.0.1:3000/api/anime/search?q=naruto |
-| Info | http://127.0.0.1:3000/api/anime/info?id=... |
-| Watch | http://127.0.0.1:3000/api/anime/watch?episodeId=... |
+| What | URL (local dev) |
+|------|-----------------|
+| Health | http://127.0.0.1:3003/api/health |
+| Episodes | http://127.0.0.1:3003/api/anime/info?id=allanime:... |
+| Stream | http://127.0.0.1:3003/api/stream/:episodeId?category=sub |
+| Search | http://127.0.0.1:3003/api/anime/search?q=naruto |
 
-Deploy this service separately (Railway, Render, Fly.io, etc.). The frontend is a static Vite app and talks to the API via `VITE_STREAM_API_URL`.
+Deploy separately (Railway recommended, or VPS + PM2). Frontend is a static Vite app.
+
+| Guide | URL |
+|-------|-----|
+| Railway (recommended) | [../deploy/railway.md](../deploy/railway.md) |
+| Cloudflare DNS | [../deploy/cloudflare-dns.md](../deploy/cloudflare-dns.md) |
+| Full overview | [../DEPLOYMENT.md](../DEPLOYMENT.md) |
+
+Config-as-code: [`railway.toml`](railway.toml), optional [`Dockerfile`](Dockerfile).
 
 ## Local dev
 
@@ -21,7 +29,7 @@ npm install
 npm run dev
 ```
 
-Terminal 2 — frontend (proxies `/api` to port 3000):
+Terminal 2 — frontend (proxies `/api` to port 3003):
 
 ```powershell
 npm run dev
@@ -31,32 +39,49 @@ npm run dev
 
 ```powershell
 cd stream-api
+cp .env.example .env   # edit FRONTEND_ORIGIN, KV credentials
 npm install
 npm run build
 npm start
 ```
 
-Binds to `process.env.PORT` (default `3000`).
+Entry point: `dist/src/server.js` (via `npm start`).
+
+Binds to `process.env.PORT` (default **3003**).
+
+**PM2:**
+
+```bash
+npm run build
+pm2 start dist/src/server.js --name stream-api
+pm2 save
+```
 
 ## Frontend env
 
-Point the Vite app at your deployed API:
-
-```text
-VITE_STREAM_API_URL=https://your-stream-api.example.com
+```env
+VITE_API_URL=https://api.nskanime.uk
 ```
 
-In local dev, leave this unset — Vite proxies `/api` to `http://127.0.0.1:3000`.
+In local dev, leave unset — Vite proxies `/api` to `http://127.0.0.1:3003`.
 
-## Optional env
+Same-origin nginx deploy: leave `VITE_API_URL` unset; proxy `/api/` to stream-api.
 
-```text
-PORT=3000
-FRONTEND_ORIGIN=https://your-frontend.example.com
-STREAM_PROVIDER=consumet-multi
-KV_REST_API_URL=
-KV_REST_API_TOKEN=
-STREAM_PROVIDER_BASE_URL=
+## Environment
+
+See [`.env.example`](.env.example). Key vars:
+
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | Listen port (default 3003) |
+| `NODE_ENV` | `production` enables startup env warnings |
+| `FRONTEND_ORIGIN` | CORS allowlist (comma-separated) |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Redis/Upstash cache (optional) |
+
+## Validation
+
+```bash
+# from repo root, with API running:
+npm run validate:deploy
+API_BASE=https://api.nskanime.uk npm run validate:deploy
 ```
-
-`FRONTEND_ORIGIN` may be a comma-separated list. Use `*` to allow all origins (default).

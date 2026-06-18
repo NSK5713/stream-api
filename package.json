@@ -1,32 +1,32 @@
 {
-  "name": "nskanime-stream-api",
-  "version": "0.1.0",
-  "main": "dist/server.js",
-  "scripts": {
-    "dev": "nodemon src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "test:unit": "ts-node scripts/test-stream-orchestrator.ts",
-    "test:small": "ts-node scripts/test-dedupe-cb.ts"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "@consumet/extensions": "^1.8.8",
-    "cors": "^2.8.5",
-    "dotenv": "^17.4.2",
-    "express": "^4.18.0",
-    "express-rate-limit": "^8.5.2",
-    "ioredis": "^5.11.1",
-    "lru-cache": "^11.5.1"
-  },
-  "devDependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/express": "^4.17.25",
-    "@types/node": "^20.19.43",
-    "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
-  }
+    "name":  "nskanime-stream-api",
+    "version":  "0.1.0",
+    "main":  "dist/server.js",
+    "scripts":  {
+                    "dev":  "nodemon src/server.ts",
+                    "build":  "tsc",
+                    "start":  "node dist/server.js",
+                    "test:unit":  "ts-node scripts/test-stream-orchestrator.ts",
+                    "test:small":  "ts-node scripts/test-dedupe-cb.ts"
+                },
+    "engines":  {
+                    "node":  "\u003e=20"
+                },
+    "dependencies":  {
+                         "@consumet/extensions":  "^1.8.8",
+                         "cors":  "^2.8.5",
+                         "dotenv":  "^17.4.2",
+                         "express":  "^4.18.0",
+                         "express-rate-limit":  "^8.5.2",
+                         "ioredis":  "^5.11.1",
+                         "lru-cache":  "^11.5.1"
+                     },
+    "devDependencies":  {
+                            "@types/cors":  "^2.8.19",
+                            "@types/express":  "^4.17.25",
+                            "@types/node":  "^20.19.43",
+                            "nodemon":  "^3.1.14",
+                            "ts-node":  "^10.9.2",
+                            "typescript":  "^5.9.3"
+                        }
 }
