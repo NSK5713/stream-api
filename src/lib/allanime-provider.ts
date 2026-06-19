@@ -11,7 +11,37 @@ const ALLANIME_KEY = crypto.createHash("sha256").update("Xot36i3lK3:v1").digest(
 const ALLANIME_FETCH_TIMEOUT_MS = 22_000;
 
 const PRODUCTION_ALLANIME_RELAY = "https://nskanime.uk/allanime-api";
+const PRODUCTION_FETCH_RELAY = "https://nskanime.uk/allanime-fetch";
 const DIRECT_ALLANIME_API = "https://api.allanime.day/api";
+
+function resolveFetchRelayUrl(): string {
+  const configured = process.env.ALLANIME_FETCH_RELAY_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+  return PRODUCTION_FETCH_RELAY;
+}
+
+function shouldUseFetchRelay(): boolean {
+  if (process.env.ALLANIME_FETCH_RELAY_URL?.trim()) return true;
+  return isDeployedRuntime();
+}
+
+async function fetchForAllAnime(targetUrl: string, accept = "*/*"): Promise<Response> {
+  if (shouldUseFetchRelay()) {
+    const relayUrl = `${resolveFetchRelayUrl()}?url=${encodeURIComponent(targetUrl)}`;
+    return fetchAllAnime(relayUrl, {
+      headers: buildAllAnimeHeaders({ Accept: accept }),
+    });
+  }
+
+  return fetchAllAnime(targetUrl, {
+    headers: {
+      Referer: ALLANIME_REFERER,
+      Origin: ALLANIME_ORIGIN,
+      Accept: accept,
+      "User-Agent": USER_AGENT,
+    },
+  });
+}
 
 function resolveAllAnimeApiUrl(): string {
   const configured = process.env.ALLANIME_API_URL?.trim();
@@ -258,14 +288,7 @@ function resolveProviderUrl(raw: string): string {
 }
 
 async function fetchClockJson(url: string): Promise<ClockResponse> {
-  const response = await fetch(url, {
-    headers: {
-      Referer: ALLANIME_REFERER,
-      Origin: ALLANIME_ORIGIN,
-      Accept: "application/json",
-      "User-Agent": USER_AGENT,
-    },
-  });
+  const response = await fetchForAllAnime(url, "application/json");
 
   if (!response.ok) {
     throw new Error(`AllAnime clock request failed: ${response.status}`);
@@ -286,9 +309,7 @@ async function fetchClockJson(url: string): Promise<ClockResponse> {
 }
 
 async function resolveEmbedSources(embedUrl: string): Promise<EpisodeSourcesResponse> {
-  const response = await fetch(embedUrl, {
-    headers: { Referer: ALLANIME_REFERER, "User-Agent": USER_AGENT },
-  });
+  const response = await fetchForAllAnime(embedUrl, "text/html,application/xhtml+xml,*/*");
   if (!response.ok) throw new Error(`AllAnime embed fetch failed: ${response.status}`);
 
   const html = await response.text();
