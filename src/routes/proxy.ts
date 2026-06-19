@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Readable } from "node:stream";
 import { isAllowedProxyRequest } from "../lib/proxy-allowlist";
-import { isM3u8Response, rewriteM3u8Manifest } from "../lib/m3u8-rewrite";
+import { rewriteM3u8Manifest } from "../lib/m3u8-rewrite";
 
 export const proxyRouter = Router();
 
@@ -36,7 +36,8 @@ proxyRouter.get("/", async (req, res) => {
     res.status(upstream.status);
 
     const contentType = upstream.headers.get("content-type");
-    const isM3u8 = isM3u8Response(url, contentType);
+    const mightBeM3u8 =
+      (contentType && /mpegurl/i.test(contentType)) || /\.m3u8(\?|$)/i.test(url);
 
     const passthroughHeaders = [
       "content-length",
@@ -48,19 +49,11 @@ proxyRouter.get("/", async (req, res) => {
     ];
 
     for (const name of passthroughHeaders) {
-      if (isM3u8 && name === "content-length") continue;
       const value = upstream.headers.get(name);
       if (value) res.setHeader(name, value);
     }
 
-    if (isM3u8) {
-      res.setHeader(
-        "content-type",
-        contentType && /mpegurl/i.test(contentType)
-          ? contentType
-          : "application/vnd.apple.mpegurl",
-      );
-    } else if (contentType) {
+    if (contentType) {
       res.setHeader("content-type", contentType);
     }
 
@@ -71,10 +64,29 @@ proxyRouter.get("/", async (req, res) => {
       return;
     }
 
-    if (isM3u8) {
+    if (mightBeM3u8 && upstream.ok) {
       const text = await upstream.text();
-      const rewritten = rewriteM3u8Manifest(text, url, referer, origin);
-      res.send(rewritten);
+      if (text.trimStart().startsWith("#EXTM3U")) {
+        res.setHeader(
+          "content-type",
+          contentType && /mpegurl/i.test(contentType)
+            ? contentType
+            : "application/vnd.apple.mpegurl",
+        );
+        res.removeHeader("content-length");
+        res.send(rewriteM3u8Manifest(text, url, referer, origin));
+        return;
+      }
+
+      if (contentType) res.setHeader("content-type", contentType);
+      res.send(text);
+      return;
+    }
+
+    if (mightBeM3u8) {
+      const text = await upstream.text();
+      if (contentType) res.setHeader("content-type", contentType);
+      res.send(text);
       return;
     }
 
