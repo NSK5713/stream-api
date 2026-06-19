@@ -11,6 +11,7 @@ import { proxyRouter } from "./routes/proxy";
 import { skipTimesRouter } from "./routes/skipTimes";
 import { libraryRouter } from "./routes/library";
 import { anilistRouter } from "./routes/anilist";
+import { isDeployedRuntime, NSKANIME_ORIGINS } from "./lib/deploy-env";
 
 dotenv.config();
 
@@ -23,9 +24,7 @@ function parseAllowedOrigins(): string[] {
 
   if (configured.length) return configured;
 
-  if (process.env.NODE_ENV === "production") {
-    return ["https://nskanime.uk", "https://www.nskanime.uk"];
-  }
+  if (isDeployedRuntime()) return [...NSKANIME_ORIGINS];
 
   return [];
 }

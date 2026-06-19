@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { EpisodeSourcesResponse } from "./provider";
+import { isDeployedRuntime } from "./deploy-env";
 
 const ALLANIME_REFERER = "https://youtu-chan.com";
 const ALLANIME_ORIGIN = "https://allanime.day";
@@ -16,7 +17,7 @@ function resolveAllAnimeApiUrl(): string {
   const configured = process.env.ALLANIME_API_URL?.trim();
   if (configured) return configured.replace(/\/$/, "");
 
-  if (process.env.NODE_ENV === "production") {
+  if (isDeployedRuntime()) {
     return PRODUCTION_ALLANIME_RELAY;
   }
 
