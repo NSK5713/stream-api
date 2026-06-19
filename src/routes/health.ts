@@ -7,7 +7,7 @@ import {
 import { probeAllAnimeSearch } from "../lib/allanime-provider";
 import { isDeployedRuntime } from "../lib/deploy-env";
 
-const API_REVISION = "2026-06-19-episode-cache";
+const API_REVISION = "2026-06-19-episode-cache-v2";
 
 export const healthRouter = Router();
 
@@ -40,6 +40,19 @@ healthRouter.get("/", async (req, res) => {
   if (String(req.query.probe ?? "") === "allanime") {
     payload.allanime = await probeAllAnimeSearch();
     payload.ok = providerConfigured && (payload.allanime as { ok: boolean }).ok;
+  }
+
+  if (String(req.query.probe ?? "") === "episodes") {
+    try {
+      const { allanimeProvider } = await import("../lib/allanime-provider");
+      const result = await allanimeProvider.episodes("2P7kFgthrEfRRkcdm");
+      payload.episodesProbe = { ok: result.episodes.length > 0, count: result.episodes.length };
+    } catch (error) {
+      payload.episodesProbe = {
+        ok: false,
+        error: error instanceof Error ? error.message : "episodes probe failed",
+      };
+    }
   }
 
   res.status(200).json(payload);

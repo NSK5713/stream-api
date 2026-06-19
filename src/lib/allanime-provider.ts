@@ -421,7 +421,7 @@ export const allanimeProvider = {
 
   async episodes(showId: string) {
     const cached = showEpisodesCache.get(showId);
-    if (cached && cached.expires > Date.now()) {
+    if (cached && cached.expires > Date.now() && cached.episodes.length > 0) {
       return { episodes: cached.episodes };
     }
 
