@@ -1,9 +1,14 @@
 import { streamProvider, type StreamCategory } from "../lib/provider";
 import type { EpisodeSourcesResponse } from "../lib/provider";
 import type { EpisodeId } from "../types/episode";
-import { getCache, setCache } from "../lib/cache";
 import { acquireLock, releaseLock } from "../lib/lock";
 import { canRequest, recordFailure, recordSuccess } from "../lib/circuitBreaker";
+import {
+  dedupeStreamResolution,
+  getResolvedStreamCache,
+  setResolvedStreamCache,
+  type ResolvedStreamPayload,
+} from "../lib/streamUrlCache";
 import {
   isTimeoutError,
   logStreamFailure,
@@ -13,15 +18,15 @@ import {
   recordResolutionStart,
   recordServerAttempt,
 } from "../lib/observability";
+
 // ONLY allowed mapping layer for provider response shape
-function extractServers(serverData: any) {
-  if (!serverData) return [];
-  if (Array.isArray(serverData.servers)) return serverData.servers;
-  if (Array.isArray(serverData.data)) return serverData.data;
+function extractServers(serverData: unknown) {
+  if (!serverData || typeof serverData !== "object") return [];
+  const record = serverData as { servers?: unknown; data?: unknown };
+  if (Array.isArray(record.servers)) return record.servers;
+  if (Array.isArray(record.data)) return record.data;
   return [];
 }
-
-/* ============================================================ */
 
 export class StreamResolutionError extends Error {
   statusCode: number;
@@ -32,39 +37,24 @@ export class StreamResolutionError extends Error {
   }
 }
 
-/* ============================================================
-   STREAM VALIDATION (lightweight fallback check)
-============================================================ */
+function isAllAnimeEpisodeId(episodeId: EpisodeId): boolean {
+  return episodeId.startsWith("allanime:");
+}
 
-/* ============================================================
-   V10 STREAM ENGINE (PRODUCTION)
-============================================================ */
-
-export async function resolveStreamV10(
+async function resolveStreamUncached(
   episodeId: EpisodeId,
   category: StreamCategory,
-) {
-  const cacheKey = `stream:${episodeId}:${category}`;
-
-  /* ---------------- CACHE ---------------- */
-  const cached = await getCache(cacheKey);
-  if (cached) {
-    recordCacheHit();
-    return { ...cached, cached: true };
-  }
-
-  /* ---------------- LOCK ---------------- */
-  const locked = await acquireLock(cacheKey, 10);
+): Promise<ResolvedStreamPayload> {
+  const locked = await acquireLock(`stream:${episodeId}:${category}`, 10);
 
   if (!locked) {
-    // retry cache while another instance resolves
     recordCircuitOpenSkip("lock-contention");
-    for (let i = 0; i < 5; i++) {
-      await new Promise((r) => setTimeout(r, 300));
-      const retry = await getCache(cacheKey);
+    for (let i = 0; i < 8; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const retry = await getResolvedStreamCache(episodeId, category);
       if (retry) {
         recordCacheHit();
-        return { ...retry, cached: true };
+        return retry;
       }
     }
   }
@@ -74,7 +64,6 @@ export async function resolveStreamV10(
   const serversTried: string[] = [];
 
   try {
-    /* ---------------- SERVERS ---------------- */
     const serverData = await streamProvider.servers(episodeId);
     const servers = extractServers(serverData);
 
@@ -88,8 +77,10 @@ export async function resolveStreamV10(
       throw new StreamResolutionError("No servers available", 404);
     }
 
-    /* ---------------- TRY SERVERS ---------------- */
-    for (const server of servers) {
+    // AllAnime sources() already walks every mirror — one call is enough.
+    const serversToTry = isAllAnimeEpisodeId(episodeId) ? servers.slice(0, 1) : servers;
+
+    for (const server of serversToTry) {
       if (!canRequest(server.id)) {
         recordCircuitOpenSkip(server.id);
         continue;
@@ -120,17 +111,12 @@ export async function resolveStreamV10(
           continue;
         }
 
-
-        
-        // DO NOT validate stream URLs
-// trust provider output directly
-
         const latencyMs = Date.now() - attemptStart;
         recordServerAttempt(server.id, latencyMs, "success");
         recordSuccess(server.id);
         recordResolutionOutcome(true);
 
-        const output = {
+        const output: ResolvedStreamPayload = {
           episodeId,
           server,
           sources: res.sources,
@@ -138,27 +124,25 @@ export async function resolveStreamV10(
           subtitles: res.subtitles,
         };
 
-        await setCache(cacheKey, output, 60 * 10);
-
+        await setResolvedStreamCache(episodeId, category, output);
         return output;
       } catch (err) {
         const latencyMs = Date.now() - attemptStart;
-        const category = isTimeoutError(err) ? "timeout" : "provider_error";
+        const failureCategory = isTimeoutError(err) ? "timeout" : "provider_error";
         recordServerAttempt(server.id, latencyMs, "failure");
         logStreamFailure({
           episodeId,
-          category,
+          category: failureCategory,
           serverId: server.id,
           latencyMs,
           serversTried: [...serversTried],
           message:
-            category === "timeout"
+            failureCategory === "timeout"
               ? "Provider request timed out"
               : "Provider sources call failed",
           error: err instanceof Error ? err.message : String(err),
         });
         recordFailure(server.id);
-        continue;
       }
     }
 
@@ -172,6 +156,25 @@ export async function resolveStreamV10(
     recordResolutionOutcome(false);
     throw new StreamResolutionError("No stream found", 404);
   } finally {
-    await releaseLock(cacheKey).catch(() => {});
+    await releaseLock(`stream:${episodeId}:${category}`).catch(() => undefined);
   }
+}
+
+export async function resolveStreamV10(episodeId: EpisodeId, category: StreamCategory) {
+  const cached = await getResolvedStreamCache(episodeId, category);
+  if (cached) {
+    recordCacheHit();
+    return { ...cached, cached: true };
+  }
+
+  return dedupeStreamResolution(episodeId, category, async () => {
+    const retry = await getResolvedStreamCache(episodeId, category);
+    if (retry) {
+      recordCacheHit();
+      return { ...retry, cached: true };
+    }
+
+    const output = await resolveStreamUncached(episodeId, category);
+    return output;
+  });
 }

@@ -15,17 +15,22 @@ const PRODUCTION_FETCH_RELAY = "https://nskanime.uk/allanime-fetch";
 const DIRECT_ALLANIME_API = "https://api.allanime.day/api";
 
 function resolveAllAnimeApiCandidates(): string[] {
-  const configured = process.env.ALLANIME_API_URL?.trim();
-  const workersDev = process.env.ALLANIME_WORKERS_DEV_URL?.trim();
+  const configured = process.env.ALLANIME_API_URL?.trim()?.replace(/\/$/, "") ?? "";
+  const workersDev = process.env.ALLANIME_WORKERS_DEV_URL?.trim()?.replace(/\/$/, "") ?? "";
   const candidates: string[] = [];
 
-  if (configured) candidates.push(configured.replace(/\/$/, ""));
+  // Railway/datacenter egress is blocked by AllAnime — relay must win on deployed runtimes.
   if (isDeployedRuntime()) {
     candidates.push(PRODUCTION_ALLANIME_RELAY);
-    if (workersDev) candidates.push(workersDev.replace(/\/$/, ""));
+    if (workersDev) candidates.push(workersDev);
+    if (configured && configured !== DIRECT_ALLANIME_API && configured !== PRODUCTION_ALLANIME_RELAY) {
+      candidates.push(configured);
+    }
+    return [...new Set(candidates.filter(Boolean))];
   }
-  candidates.push(DIRECT_ALLANIME_API);
 
+  if (configured) candidates.push(configured);
+  candidates.push(DIRECT_ALLANIME_API);
   return [...new Set(candidates.filter(Boolean))];
 }
 
@@ -120,6 +125,13 @@ async function fetchAllAnime(url: string, init: RequestInit = {}): Promise<Respo
 }
 
 const PREFERRED_PROVIDERS = ["S-mp4", "Luf-Mp4", "Default", "Yt-mp4", "Ss-Hls"];
+
+/** Static server list — avoids a slow episode payload round-trip during stream resolution. */
+export const DEFAULT_ALLANIME_EPISODE_SERVERS = PREFERRED_PROVIDERS.map((name) => ({
+  id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "default",
+  name,
+  category: "sub" as const,
+}));
 const EPISODE_QUERY_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec";
 
 type AllAnimeShowEdge = {

@@ -1,4 +1,8 @@
-import { allanimeProvider, scoreAllAnimeMatch } from "./allanime-provider";
+import {
+  allanimeProvider,
+  DEFAULT_ALLANIME_EPISODE_SERVERS,
+  scoreAllAnimeMatch,
+} from "./allanime-provider";
 import {
   buildConsumetSearchQueries,
   hasUsefulEpisodeTitles,
@@ -363,14 +367,8 @@ export const consumetMultiProvider = {
 
   async servers(episodeId: EpisodeId) {
     if (isAllAnimeId(episodeId)) {
-      const rawEpisodeId = stripProviderPrefix(episodeId).id;
-      const data = await withTimeout(allanimeProvider.servers(rawEpisodeId), "AllAnime servers", 12_000);
-      return {
-        servers: data.servers.map((server: EpisodeServer) => ({
-          ...server,
-          id: server.id,
-        })),
-      };
+      // Skip live server discovery — episode payload GraphQL is slow from Railway and duplicates sources().
+      return { servers: DEFAULT_ALLANIME_EPISODE_SERVERS };
     }
 
     const { provider, id } = stripProviderPrefix(episodeId);
