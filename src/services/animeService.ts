@@ -23,13 +23,17 @@ export async function searchAnime(query: string) {
 }
 
 /* ---------------- EPISODES ---------------- */
-export async function getAnimeInfo(animeId: string) {
+export async function getAnimeInfo(animeId: string, searchHints: string[] = [], malId?: number) {
   try {
-    const res = await streamProvider.episodes(animeId);
-    return (res as any)?.episodes ?? (res as any)?.data ?? [];
+    const res = await streamProvider.episodes(animeId, { searchHints, malId });
+    const episodes = (res as any)?.episodes ?? (res as any)?.data ?? [];
+    const enriched = episodes.some(
+      (episode: { title?: string }) => episode.title && !/^Episode\s*\d+\s*$/i.test(episode.title.trim()),
+    );
+    return { episodes, enriched };
   } catch (err) {
     console.error("getAnimeInfo error:", err);
-    return [];
+    return { episodes: [], enriched: false };
   }
 }
 
@@ -50,11 +54,7 @@ export async function getEpisodeWatchSources(
   category: StreamCategory,
 ) {
   try {
-    return await streamProvider.sources(
-      episodeId,
-      server,
-      category,
-    );
+    return await streamProvider.sources(episodeId, server, category);
   } catch (err) {
     console.error("getEpisodeWatchSources error:", err);
     return { sources: [] };

@@ -75,6 +75,7 @@ function addQueryVariants(queries: Set<string>, value: string) {
   if (beforeColon && beforeColon.length > 3 && beforeColon !== trimmed) queries.add(beforeColon);
 }
 
+/** Title query variants for streaming provider search (not episode enrichment). */
 export function buildConsumetSearchQueries(showName: string, extraHints: string[] = []): string[] {
   const queries = new Set<string>();
   addQueryVariants(queries, showName);

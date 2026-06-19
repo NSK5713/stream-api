@@ -13,6 +13,7 @@ import {
   getEpisodeWatchSources,
   searchAnime,
 } from "../services/animeService";
+import { logEpisodeResolution } from "../lib/episode-resolution";
 
 export const animeRouter = Router();
 
@@ -55,11 +56,20 @@ animeRouter.get("/info", async (req, res) => {
           .map((hint) => decodeURIComponent(hint.trim()))
           .filter(Boolean)
       : [];
+  const malId = Number(req.query.malId);
+  const resolvedMalId = Number.isFinite(malId) && malId > 0 ? malId : undefined;
 
   try {
-    const episodes = await getAnimeInfo(animeId);
+    const result = await getAnimeInfo(animeId, searchHints, resolvedMalId);
+    logEpisodeResolution({
+      incomingAnimeId: rawId,
+      resolvedProviderAnime: { id: animeId },
+      episodeListLength: Array.isArray(result.episodes) ? result.episodes.length : 0,
+      requestedEpisodeNumber: 0,
+      mappedEpisode: null,
+    });
     setHttpCacheControl(res, STREAM_CACHE_TTL.episodes);
-    res.status(200).json({ episodes });
+    res.status(200).json(result);
   } catch (error) {
     res.status(502).json({
       error: error instanceof Error ? error.message : "Provider episodes failed",
@@ -85,9 +95,9 @@ animeRouter.get("/watch", async (req, res) => {
 
   try {
     if (!server) {
-      const servers = await getEpisodeServers(episodeId);
+      const data = await getEpisodeServers(episodeId);
       setHttpCacheControl(res, STREAM_CACHE_TTL.servers);
-      res.status(200).json({ servers });
+      res.status(200).json(data);
       return;
     }
 
@@ -116,9 +126,16 @@ animeRouter.get("/:id", async (req, res) => {
   }
 
   try {
-    const episodes = await getAnimeInfo(animeId);
+    const result = await getAnimeInfo(animeId);
+    logEpisodeResolution({
+      incomingAnimeId: rawId,
+      resolvedProviderAnime: { id: animeId },
+      episodeListLength: Array.isArray(result.episodes) ? result.episodes.length : 0,
+      requestedEpisodeNumber: 0,
+      mappedEpisode: null,
+    });
     setHttpCacheControl(res, STREAM_CACHE_TTL.episodes);
-    res.status(200).json({ episodes });
+    res.status(200).json(result);
   } catch (error) {
     res.status(502).json({
       error: error instanceof Error ? error.message : "Provider episodes failed",

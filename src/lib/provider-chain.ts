@@ -1,5 +1,10 @@
 import { allanimeProvider, scoreAllAnimeMatch } from "./allanime-provider";
-import { buildConsumetSearchQueries, pickBestConsumetMatch } from "./episode-title-utils";
+import {
+  buildConsumetSearchQueries,
+  hasUsefulEpisodeTitles,
+  mergeProviderEpisodeTitles,
+  pickBestConsumetMatch,
+} from "./episode-title-utils";
 import {
   consumetAdapters,
   EPISODES_TIMEOUT_MS,
@@ -26,6 +31,64 @@ function prefixAllAnimeId(id: string): string {
 
 function isAllAnimeId(id: string): boolean {
   return id.startsWith("allanime:");
+}
+
+async function fetchConsumetEpisodeTitles(
+  showName: string,
+  searchHints: string[] = [],
+): Promise<ProviderEpisode[]> {
+  const queries = buildConsumetSearchQueries(showName, searchHints);
+  let bestEpisodes: ProviderEpisode[] = [];
+
+  for (const query of queries) {
+    for (const adapter of consumetAdapters) {
+      try {
+        const search = await withTimeout(adapter.search(query), `${adapter.key} search`, 10_000);
+        const match = pickBestConsumetMatch(search.results, query);
+        if (!match) continue;
+
+        const episodeList = await withTimeout(adapter.episodes(match.id), `${adapter.key} episodes`, 15_000);
+        if (!hasUsefulEpisodeTitles(episodeList.episodes, showName)) continue;
+
+        if (episodeList.episodes.length >= bestEpisodes.length) {
+          bestEpisodes = episodeList.episodes;
+        }
+
+        if (bestEpisodes.length > 0) return bestEpisodes;
+      } catch {
+        // Try the next consumet provider.
+      }
+    }
+  }
+
+  return bestEpisodes;
+}
+
+const ALLANIME_EPISODE_ENRICH_TIMEOUT_MS = 8_000;
+
+async function fetchJikanEpisodeTitles(malId: number): Promise<ProviderEpisode[]> {
+  if (!Number.isFinite(malId) || malId <= 0) return [];
+
+  try {
+    const response = await fetch(`https://api.jikan.moe/v4/anime/${malId}/episodes?page=1`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return [];
+
+    const json = (await response.json()) as {
+      data?: Array<{ mal_id: number; title?: string | null }>;
+    };
+
+    return (json.data ?? [])
+      .map((episode) => ({
+        id: String(episode.mal_id),
+        number: episode.mal_id,
+        title: episode.title?.trim() || `Episode ${episode.mal_id}`,
+      }))
+      .filter((episode) => episode.number > 0);
+  } catch {
+    return [];
+  }
 }
 
 function mapServerForHiAnimeSkip(server: string): string {
@@ -223,12 +286,67 @@ export const consumetMultiProvider = {
     return { results: consumetResults };
   },
 
-  async episodes(animeId: string, _options?: { searchHints?: string[] }) {
+  async episodes(animeId: string, options?: { searchHints?: string[]; malId?: number }) {
     if (isAllAnimeId(animeId)) {
       const showId = stripProviderPrefix(animeId).id;
       const data = await withTimeout(allanimeProvider.episodes(showId), "AllAnime episodes", EPISODES_TIMEOUT_MS);
+      let episodes = data.episodes;
+
+      const showName = await allanimeProvider.getShowName(showId).catch(() => null);
+      const shouldEnrichTitles =
+        showName &&
+        episodes.length > 0 &&
+        episodes.length <= 72 &&
+        episodes.every((episode) => /^Episode\s*\d+\s*$/i.test(episode.title.trim()));
+
+      if (shouldEnrichTitles && showName) {
+        console.log("[enrichment]", { animeId: showId, status: "started", totalCount: episodes.length });
+        const consumetEpisodes = await Promise.race([
+          fetchConsumetEpisodeTitles(showName, options?.searchHints ?? []),
+          new Promise<ProviderEpisode[]>((resolve) => {
+            setTimeout(() => resolve([]), ALLANIME_EPISODE_ENRICH_TIMEOUT_MS);
+          }),
+        ]);
+        if (consumetEpisodes.length) {
+          episodes = mergeProviderEpisodeTitles(episodes, consumetEpisodes, showName);
+          console.log("[enrichment]", {
+            animeId: showId,
+            status: "success",
+            source: "consumet",
+            enrichedCount: consumetEpisodes.length,
+            totalCount: episodes.length,
+          });
+        } else if (options?.malId) {
+          const jikanEpisodes = await fetchJikanEpisodeTitles(options.malId);
+          if (jikanEpisodes.length) {
+            episodes = mergeProviderEpisodeTitles(episodes, jikanEpisodes, showName);
+            console.log("[enrichment]", {
+              animeId: showId,
+              status: "success",
+              source: "jikan",
+              enrichedCount: jikanEpisodes.length,
+              totalCount: episodes.length,
+            });
+          } else {
+            console.log("[enrichment]", {
+              animeId: showId,
+              status: "fail",
+              totalCount: episodes.length,
+              reason: "consumet and jikan returned no titles",
+            });
+          }
+        } else {
+          console.log("[enrichment]", {
+            animeId: showId,
+            status: "fail",
+            totalCount: episodes.length,
+            reason: "no consumet titles within timeout",
+          });
+        }
+      }
+
       return {
-        episodes: data.episodes.map((episode) => ({
+        episodes: episodes.map((episode) => ({
           ...episode,
           id: prefixAllAnimeId(episode.id),
         })),
