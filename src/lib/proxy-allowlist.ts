@@ -5,6 +5,7 @@ export const PROXY_ALWAYS_ALLOWED_HOSTS = [
   "youtu-chan.com",
   "repackager.wixmp.com",
   "video.wixstatic.com",
+  "tools.fast4speed.rsvp",
 ] as const;
 
 /**

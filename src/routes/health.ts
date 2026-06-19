@@ -7,7 +7,7 @@ import {
 import { probeAllAnimeSearch } from "../lib/allanime-provider";
 import { isDeployedRuntime } from "../lib/deploy-env";
 
-const API_REVISION = "2026-06-19-railway-relay";
+const API_REVISION = "2026-06-19-media-proxy";
 
 export const healthRouter = Router();
 
