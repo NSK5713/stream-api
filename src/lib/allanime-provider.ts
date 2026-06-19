@@ -3,11 +3,42 @@ import type { EpisodeSourcesResponse } from "./provider";
 
 const ALLANIME_REFERER = "https://youtu-chan.com";
 const ALLANIME_ORIGIN = "https://allanime.day";
-const ALLANIME_API = "https://api.allanime.day/api";
 const ALLANIME_BASE = "https://allanime.day";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const ALLANIME_KEY = crypto.createHash("sha256").update("Xot36i3lK3:v1").digest();
+const ALLANIME_FETCH_TIMEOUT_MS = 22_000;
+
+function resolveAllAnimeApiUrl(): string {
+  return (process.env.ALLANIME_API_URL || "https://api.allanime.day/api").replace(/\/$/, "");
+}
+
+function buildAllAnimeHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = {
+    Referer: ALLANIME_REFERER,
+    Origin: ALLANIME_REFERER,
+    "User-Agent": USER_AGENT,
+    ...extra,
+  };
+
+  const relayToken = process.env.ALLANIME_RELAY_TOKEN?.trim();
+  if (relayToken) {
+    headers["X-AllAnime-Relay-Token"] = relayToken;
+  }
+
+  return headers;
+}
+
+async function fetchAllAnime(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ALLANIME_FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 const PREFERRED_PROVIDERS = ["S-mp4", "Luf-Mp4", "Default", "Yt-mp4", "Ss-Hls"];
 const EPISODE_QUERY_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec";
@@ -91,14 +122,10 @@ function normalizeTobeparsed(value: unknown): unknown {
 }
 
 async function allAnimeGql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const response = await fetch(ALLANIME_API, {
+  const apiUrl = resolveAllAnimeApiUrl();
+  const response = await fetchAllAnime(apiUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Referer: ALLANIME_REFERER,
-      Origin: ALLANIME_REFERER,
-      "User-Agent": USER_AGENT,
-    },
+    headers: buildAllAnimeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ variables, query }),
   });
 
@@ -115,7 +142,10 @@ async function allAnimeGql<T>(query: string, variables: Record<string, unknown>)
 type EpisodePayload = { episode?: { sourceUrls?: AllAnimeEpisodeSource[] } };
 
 const episodePayloadCache = new Map<string, { payload: EpisodePayload; expires: number }>();
-const EPISODE_PAYLOAD_CACHE_TTL_MS = 30_000;
+const EPISODE_PAYLOAD_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const showEpisodesCache = new Map<string, { episodes: Array<{ id: string; number: number; title: string }>; expires: number }>();
+const SHOW_EPISODES_CACHE_TTL_MS = 60 * 60 * 1000;
 
 async function fetchEpisodePayload(
   showId: string,
@@ -124,14 +154,11 @@ async function fetchEpisodePayload(
 ): Promise<EpisodePayload> {
   const variables = { showId, translationType, episodeString: episodeStringValue };
   const extensions = { persistedQuery: { version: 1, sha256Hash: EPISODE_QUERY_HASH } };
-  const url = `${ALLANIME_API}?variables=${encodeURIComponent(JSON.stringify(variables))}&extensions=${encodeURIComponent(JSON.stringify(extensions))}`;
+  const apiUrl = resolveAllAnimeApiUrl();
+  const url = `${apiUrl}?variables=${encodeURIComponent(JSON.stringify(variables))}&extensions=${encodeURIComponent(JSON.stringify(extensions))}`;
 
-  const response = await fetch(url, {
-    headers: {
-      Referer: ALLANIME_REFERER,
-      Origin: ALLANIME_REFERER,
-      "User-Agent": USER_AGENT,
-    },
+  const response = await fetchAllAnime(url, {
+    headers: buildAllAnimeHeaders(),
   });
 
   if (!response.ok) {
@@ -360,21 +387,43 @@ export const allanimeProvider = {
   },
 
   async episodes(showId: string) {
+    const cached = showEpisodesCache.get(showId);
+    if (cached && cached.expires > Date.now()) {
+      return { episodes: cached.episodes };
+    }
+
     const data = await allAnimeGql<{ data?: { show?: { availableEpisodesDetail?: Record<string, string[]> } } }>(
       `query($showId: String!) { show(_id: $showId) { _id availableEpisodesDetail }}`,
       { showId },
     );
 
-    const subEpisodes = data.data?.show?.availableEpisodesDetail?.sub ?? [];
-    const episodes = subEpisodes
-      .map((episodeStringValue) => Number(episodeStringValue))
-      .filter((number) => Number.isFinite(number))
-      .sort((a, b) => a - b)
+    const detail = data.data?.show?.availableEpisodesDetail ?? {};
+    const episodeNumbers = new Set<number>();
+    for (const bucket of Object.values(detail)) {
+      for (const episodeStringValue of bucket) {
+        const number = Number(episodeStringValue);
+        if (Number.isFinite(number) && number > 0) {
+          episodeNumbers.add(number);
+        }
+      }
+    }
+
+    const episodes = [...episodeNumbers]
+      .sort((left, right) => left - right)
       .map((number) => ({
         id: `${showId}@${episodeString(number)}`,
         number,
         title: `Episode ${number}`,
       }));
+
+    showEpisodesCache.set(showId, {
+      episodes,
+      expires: Date.now() + SHOW_EPISODES_CACHE_TTL_MS,
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[allanime-episodes]", { showId, episodeListLength: episodes.length });
+    }
 
     return { episodes };
   },
@@ -451,3 +500,30 @@ function episodeString(number: number): string {
 }
 
 export { scoreProviderTitleMatch as scoreAllAnimeMatch } from "./provider-match-utils";
+
+export async function probeAllAnimeSearch(): Promise<{
+  ok: boolean;
+  latencyMs: number;
+  apiUrl: string;
+  sample?: string;
+  error?: string;
+}> {
+  const started = Date.now();
+  const apiUrl = resolveAllAnimeApiUrl();
+  try {
+    const result = await allanimeProvider.search("Naruto");
+    return {
+      ok: result.results.length > 0,
+      latencyMs: Date.now() - started,
+      apiUrl,
+      sample: result.results[0]?.title,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - started,
+      apiUrl,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}

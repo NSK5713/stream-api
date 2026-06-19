@@ -4,10 +4,11 @@ import {
   ensureProviderConfigured,
   streamProviderCacheEnabled,
 } from "../lib/provider";
+import { probeAllAnimeSearch } from "../lib/allanime-provider";
 
 export const healthRouter = Router();
 
-healthRouter.get("/", (_req, res) => {
+healthRouter.get("/", async (req, res) => {
   let providerConfigured = false;
   try {
     ensureProviderConfigured();
@@ -16,7 +17,7 @@ healthRouter.get("/", (_req, res) => {
     providerConfigured = false;
   }
 
-  res.status(200).json({
+  const payload: Record<string, unknown> = {
     ok: true,
     providerConfigured,
     providerMode: activeStreamProviderMode,
@@ -24,5 +25,12 @@ healthRouter.get("/", (_req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     timestamp: new Date().toISOString(),
-  });
+  };
+
+  if (String(req.query.probe ?? "") === "allanime") {
+    payload.allanime = await probeAllAnimeSearch();
+    payload.ok = providerConfigured && (payload.allanime as { ok: boolean }).ok;
+  }
+
+  res.status(200).json(payload);
 });

@@ -1,10 +1,5 @@
 import { allanimeProvider, scoreAllAnimeMatch } from "./allanime-provider";
-import {
-  buildConsumetSearchQueries,
-  hasUsefulEpisodeTitles,
-  mergeProviderEpisodeTitles,
-  pickBestConsumetMatch,
-} from "./episode-title-utils";
+import { buildConsumetSearchQueries, pickBestConsumetMatch } from "./episode-title-utils";
 import {
   consumetAdapters,
   EPISODES_TIMEOUT_MS,
@@ -15,6 +10,7 @@ import {
   withTimeout,
 } from "./consumet-providers";
 import { fetchHianimeProviderSkip, type ProviderSkipTimes } from "./provider-skip";
+import { resolveEpisodeByNumber, logEpisodeResolution } from "./episode-resolution";
 import type { EpisodeId } from "../types/episode";
 import type {
   EpisodeServer,
@@ -30,39 +26,6 @@ function prefixAllAnimeId(id: string): string {
 
 function isAllAnimeId(id: string): boolean {
   return id.startsWith("allanime:");
-}
-
-const ALLANIME_EPISODE_ENRICH_TIMEOUT_MS = 2_000;
-
-async function fetchConsumetEpisodeTitles(
-  showName: string,
-  searchHints: string[] = [],
-): Promise<ProviderEpisode[]> {
-  const queries = buildConsumetSearchQueries(showName, searchHints);
-  let bestEpisodes: ProviderEpisode[] = [];
-
-  for (const query of queries) {
-    for (const adapter of consumetAdapters) {
-      try {
-        const search = await withTimeout(adapter.search(query), `${adapter.key} search`, 10_000);
-        const match = pickBestConsumetMatch(search.results, query);
-        if (!match) continue;
-
-        const episodeList = await withTimeout(adapter.episodes(match.id), `${adapter.key} episodes`, 15_000);
-        if (!hasUsefulEpisodeTitles(episodeList.episodes, showName)) continue;
-
-        if (episodeList.episodes.length >= bestEpisodes.length) {
-          bestEpisodes = episodeList.episodes;
-        }
-
-        if (bestEpisodes.length > 0) return bestEpisodes;
-      } catch {
-        // Try the next consumet provider.
-      }
-    }
-  }
-
-  return bestEpisodes;
 }
 
 function mapServerForHiAnimeSkip(server: string): string {
@@ -132,9 +95,14 @@ async function findHiAnimeEpisodeIdForAllAnime(rawEpisodeId: string): Promise<st
       if (!match) continue;
 
       const episodeList = await withTimeout(hianimeAdapter.episodes(match.id), "HiAnime episodes", 18_000);
-      const episode =
-        episodeList.episodes.find((item) => item.number === episodeNumber) ??
-        episodeList.episodes[Math.max(0, episodeNumber - 1)];
+      const episode = resolveEpisodeByNumber(episodeList.episodes, episodeNumber);
+      logEpisodeResolution({
+        incomingAnimeId: rawEpisodeId,
+        resolvedProviderAnime: { id: match.id, title: match.title },
+        episodeListLength: episodeList.episodes.length,
+        requestedEpisodeNumber: episodeNumber,
+        mappedEpisode: episode ? { id: episode.id, number: episode.number } : null,
+      });
       if (episode?.id) return episode.id;
     } catch {
       // Try the next search query.
@@ -175,9 +143,14 @@ async function fetchConsumetSourcesForAllAnimeEpisode(
         if (!match) continue;
 
         const episodeList = await withTimeout(adapter.episodes(match.id), `${adapter.key} episodes`, 18_000);
-        const episode =
-          episodeList.episodes.find((item) => item.number === episodeNumber) ??
-          episodeList.episodes[Math.max(0, episodeNumber - 1)];
+        const episode = resolveEpisodeByNumber(episodeList.episodes, episodeNumber);
+        logEpisodeResolution({
+          incomingAnimeId: rawEpisodeId,
+          resolvedProviderAnime: { id: match.id, title: match.title },
+          episodeListLength: episodeList.episodes.length,
+          requestedEpisodeNumber: episodeNumber,
+          mappedEpisode: episode ? { id: episode.id, number: episode.number } : null,
+        });
         if (!episode) continue;
 
         const serverId = server || "default";
@@ -229,49 +202,33 @@ async function searchAllAnime(query: string): Promise<ProviderAnime[]> {
 
 export const consumetMultiProvider = {
   async search(query: string) {
-    const [allanimeSettled, consumetSettled] = await Promise.allSettled([
-      searchAllAnime(query),
-      searchConsumetChain(query),
-    ]);
-
-    const consumetResults = consumetSettled.status === "fulfilled" ? consumetSettled.value : [];
-    const allanimeResults = allanimeSettled.status === "fulfilled" ? allanimeSettled.value : [];
-
-    const merged = new Map<string, ProviderAnime>();
-    for (const item of [...consumetResults, ...allanimeResults]) {
-      if (!merged.has(item.id)) merged.set(item.id, item);
+    let allanimeResults: ProviderAnime[] = [];
+    try {
+      allanimeResults = await searchAllAnime(query);
+    } catch {
+      allanimeResults = [];
     }
 
-    return { results: [...merged.values()] };
+    if (allanimeResults.length > 0) {
+      return { results: allanimeResults };
+    }
+
+    let consumetResults: ProviderAnime[] = [];
+    try {
+      consumetResults = await searchConsumetChain(query);
+    } catch {
+      consumetResults = [];
+    }
+
+    return { results: consumetResults };
   },
 
-  async episodes(animeId: string, options?: { searchHints?: string[] }) {
+  async episodes(animeId: string, _options?: { searchHints?: string[] }) {
     if (isAllAnimeId(animeId)) {
       const showId = stripProviderPrefix(animeId).id;
       const data = await withTimeout(allanimeProvider.episodes(showId), "AllAnime episodes", EPISODES_TIMEOUT_MS);
-      let episodes = data.episodes;
-
-      const showName = await allanimeProvider.getShowName(showId).catch(() => null);
-      const shouldEnrichTitles =
-        showName &&
-        episodes.length > 0 &&
-        episodes.length <= 72 &&
-        episodes.every((episode) => /^Episode\s*\d+\s*$/i.test(episode.title.trim()));
-
-      if (shouldEnrichTitles && showName) {
-        const consumetEpisodes = await Promise.race([
-          fetchConsumetEpisodeTitles(showName, options?.searchHints ?? []),
-          new Promise<ProviderEpisode[]>((resolve) => {
-            setTimeout(() => resolve([]), ALLANIME_EPISODE_ENRICH_TIMEOUT_MS);
-          }),
-        ]);
-        if (consumetEpisodes.length) {
-          episodes = mergeProviderEpisodeTitles(episodes, consumetEpisodes, showName);
-        }
-      }
-
       return {
-        episodes: episodes.map((episode) => ({
+        episodes: data.episodes.map((episode) => ({
           ...episode,
           id: prefixAllAnimeId(episode.id),
         })),
