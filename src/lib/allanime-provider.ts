@@ -196,10 +196,11 @@ async function fetchEpisodePayload(
   const variables = { showId, translationType, episodeString: episodeStringValue };
   const extensions = { persistedQuery: { version: 1, sha256Hash: EPISODE_QUERY_HASH } };
   const apiUrl = resolveAllAnimeApiUrl();
-  const url = `${apiUrl}?variables=${encodeURIComponent(JSON.stringify(variables))}&extensions=${encodeURIComponent(JSON.stringify(extensions))}`;
 
-  const response = await fetchAllAnime(url, {
-    headers: buildAllAnimeHeaders(),
+  const response = await fetchAllAnime(apiUrl, {
+    method: "POST",
+    headers: buildAllAnimeHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ variables, extensions }),
   });
 
   if (!response.ok) {
