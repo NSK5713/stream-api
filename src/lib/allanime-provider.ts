@@ -9,8 +9,18 @@ const USER_AGENT =
 const ALLANIME_KEY = crypto.createHash("sha256").update("Xot36i3lK3:v1").digest();
 const ALLANIME_FETCH_TIMEOUT_MS = 22_000;
 
+const PRODUCTION_ALLANIME_RELAY = "https://nskanime.uk/allanime-api";
+const DIRECT_ALLANIME_API = "https://api.allanime.day/api";
+
 function resolveAllAnimeApiUrl(): string {
-  return (process.env.ALLANIME_API_URL || "https://api.allanime.day/api").replace(/\/$/, "");
+  const configured = process.env.ALLANIME_API_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  if (process.env.NODE_ENV === "production") {
+    return PRODUCTION_ALLANIME_RELAY;
+  }
+
+  return DIRECT_ALLANIME_API;
 }
 
 function buildAllAnimeHeaders(extra?: Record<string, string>): Record<string, string> {
