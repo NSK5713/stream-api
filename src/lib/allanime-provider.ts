@@ -14,6 +14,44 @@ const PRODUCTION_ALLANIME_RELAY = "https://nskanime.uk/allanime-api";
 const PRODUCTION_FETCH_RELAY = "https://nskanime.uk/allanime-fetch";
 const DIRECT_ALLANIME_API = "https://api.allanime.day/api";
 
+function resolveAllAnimeApiCandidates(): string[] {
+  const configured = process.env.ALLANIME_API_URL?.trim();
+  const workersDev = process.env.ALLANIME_WORKERS_DEV_URL?.trim();
+  const candidates: string[] = [];
+
+  if (configured) candidates.push(configured.replace(/\/$/, ""));
+  if (isDeployedRuntime()) {
+    candidates.push(PRODUCTION_ALLANIME_RELAY);
+    if (workersDev) candidates.push(workersDev.replace(/\/$/, ""));
+  }
+  candidates.push(DIRECT_ALLANIME_API);
+
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+async function fetchAllAnimeApi(init: RequestInit): Promise<Response> {
+  const candidates = resolveAllAnimeApiCandidates();
+  let lastResponse: Response | null = null;
+  let lastError: unknown = null;
+
+  for (const apiUrl of candidates) {
+    try {
+      const response = await fetchAllAnime(apiUrl, init);
+      if (response.ok) return response;
+      if ([403, 429, 502, 503, 504].includes(response.status)) {
+        lastResponse = response;
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastResponse) return lastResponse;
+  throw lastError instanceof Error ? lastError : new Error("AllAnime request failed");
+}
+
 function resolveFetchRelayUrl(): string {
   const configured = process.env.ALLANIME_FETCH_RELAY_URL?.trim();
   if (configured) return configured.replace(/\/$/, "");
@@ -163,8 +201,7 @@ function normalizeTobeparsed(value: unknown): unknown {
 }
 
 async function allAnimeGql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const apiUrl = resolveAllAnimeApiUrl();
-  const response = await fetchAllAnime(apiUrl, {
+  const response = await fetchAllAnimeApi({
     method: "POST",
     headers: buildAllAnimeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ variables, query }),
@@ -195,9 +232,8 @@ async function fetchEpisodePayload(
 ): Promise<EpisodePayload> {
   const variables = { showId, translationType, episodeString: episodeStringValue };
   const extensions = { persistedQuery: { version: 1, sha256Hash: EPISODE_QUERY_HASH } };
-  const apiUrl = resolveAllAnimeApiUrl();
 
-  const response = await fetchAllAnime(apiUrl, {
+  const response = await fetchAllAnimeApi({
     method: "POST",
     headers: buildAllAnimeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ variables, extensions }),
