@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
 import http from "http";
 
@@ -6,12 +7,38 @@ import { animeRouter } from "./routes/anime";
 import { streamRouter } from "./routes/stream";
 import { healthRouter } from "./routes/health";
 import { metricsRouter } from "./routes/metrics";
-import { streamProxyRouter } from "./routes/streamProxy";
+import { proxyRouter } from "./routes/proxy";
+import { skipTimesRouter } from "./routes/skipTimes";
+import { libraryRouter } from "./routes/library";
+import { anilistRouter } from "./routes/anilist";
 
 dotenv.config();
 
+function parseAllowedOrigins(): string[] {
+  const raw = process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || "";
+  const configured = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (configured.length) return configured;
+
+  if (process.env.NODE_ENV === "production") {
+    return ["https://nskanime.uk", "https://www.nskanime.uk"];
+  }
+
+  return [];
+}
+
+const allowedOrigins = parseAllowedOrigins();
+
 const app = express();
 
+app.use(
+  cors({
+    origin: allowedOrigins.length ? allowedOrigins : true,
+  }),
+);
 app.use(express.json());
 
 // -----------------------------
@@ -21,6 +48,10 @@ app.use("/api/anime", animeRouter);
 app.use("/api/stream", streamRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/metrics", metricsRouter);
+app.use("/api/proxy", proxyRouter);
+app.use("/api/skip-times", skipTimesRouter);
+app.use("/api/library", libraryRouter);
+app.use("/api/anilist", anilistRouter);
 
 // -----------------------------
 // BASIC ROOT
@@ -36,7 +67,7 @@ app.get("/", (_req, res) => {
 // -----------------------------
 // PORT SAFETY (FIXES EADDRINUSE ISSUES)
 // -----------------------------
-const DEFAULT_PORT = Number(process.env.PORT) || 3002;
+const DEFAULT_PORT = Number(process.env.PORT) || 3003;
 
 function findAvailablePort(startPort: number): Promise<number> {
   return new Promise((resolve) => {
