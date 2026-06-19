@@ -7,7 +7,7 @@ import {
 import { probeAllAnimeSearch } from "../lib/allanime-provider";
 import { isDeployedRuntime } from "../lib/deploy-env";
 
-const API_REVISION = "2026-06-19-title-enrich";
+const API_REVISION = "2026-06-19-title-enrich-v2";
 
 export const healthRouter = Router();
 

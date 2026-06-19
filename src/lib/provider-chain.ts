@@ -293,54 +293,56 @@ export const consumetMultiProvider = {
       let episodes = data.episodes;
 
       const showName = await allanimeProvider.getShowName(showId).catch(() => null);
-      const shouldEnrichTitles =
-        showName &&
+      const titlesAreGeneric =
         episodes.length > 0 &&
         episodes.length <= 72 &&
         episodes.every((episode) => /^Episode\s*\d+\s*$/i.test(episode.title.trim()));
+      const shouldEnrichTitles = titlesAreGeneric && Boolean(showName || options?.malId);
 
-      if (shouldEnrichTitles && showName) {
-        console.log("[enrichment]", { animeId: showId, status: "started", totalCount: episodes.length });
-        const consumetEpisodes = await Promise.race([
-          fetchConsumetEpisodeTitles(showName, options?.searchHints ?? []),
-          new Promise<ProviderEpisode[]>((resolve) => {
-            setTimeout(() => resolve([]), ALLANIME_EPISODE_ENRICH_TIMEOUT_MS);
-          }),
-        ]);
-        if (consumetEpisodes.length) {
-          episodes = mergeProviderEpisodeTitles(episodes, consumetEpisodes, showName);
+      if (shouldEnrichTitles) {
+        console.log("[enrichment]", {
+          animeId: showId,
+          status: "started",
+          totalCount: episodes.length,
+          malId: options?.malId ?? null,
+        });
+
+        let enrichedFrom: string | null = null;
+
+        if (options?.malId) {
+          const jikanEpisodes = await fetchJikanEpisodeTitles(options.malId);
+          if (jikanEpisodes.length) {
+            episodes = mergeProviderEpisodeTitles(episodes, jikanEpisodes, showName ?? undefined);
+            enrichedFrom = "jikan";
+          }
+        }
+
+        if (!enrichedFrom && showName) {
+          const consumetEpisodes = await Promise.race([
+            fetchConsumetEpisodeTitles(showName, options?.searchHints ?? []),
+            new Promise<ProviderEpisode[]>((resolve) => {
+              setTimeout(() => resolve([]), ALLANIME_EPISODE_ENRICH_TIMEOUT_MS);
+            }),
+          ]);
+          if (consumetEpisodes.length) {
+            episodes = mergeProviderEpisodeTitles(episodes, consumetEpisodes, showName);
+            enrichedFrom = "consumet";
+          }
+        }
+
+        if (enrichedFrom) {
           console.log("[enrichment]", {
             animeId: showId,
             status: "success",
-            source: "consumet",
-            enrichedCount: consumetEpisodes.length,
+            source: enrichedFrom,
             totalCount: episodes.length,
           });
-        } else if (options?.malId) {
-          const jikanEpisodes = await fetchJikanEpisodeTitles(options.malId);
-          if (jikanEpisodes.length) {
-            episodes = mergeProviderEpisodeTitles(episodes, jikanEpisodes, showName);
-            console.log("[enrichment]", {
-              animeId: showId,
-              status: "success",
-              source: "jikan",
-              enrichedCount: jikanEpisodes.length,
-              totalCount: episodes.length,
-            });
-          } else {
-            console.log("[enrichment]", {
-              animeId: showId,
-              status: "fail",
-              totalCount: episodes.length,
-              reason: "consumet and jikan returned no titles",
-            });
-          }
         } else {
           console.log("[enrichment]", {
             animeId: showId,
             status: "fail",
             totalCount: episodes.length,
-            reason: "no consumet titles within timeout",
+            reason: "jikan and consumet returned no titles",
           });
         }
       }

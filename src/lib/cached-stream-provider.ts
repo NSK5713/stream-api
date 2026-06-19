@@ -6,7 +6,7 @@ import {
   STREAM_CACHE_TTL,
 } from "./kv-cache";
 
-type EpisodesOptions = { searchHints?: string[] };
+type EpisodesOptions = { searchHints?: string[]; malId?: number };
 
 type StreamProviderLike = {
   search(query: string): Promise<unknown>;
@@ -39,7 +39,8 @@ export function wrapStreamProviderWithCache<T extends StreamProviderLike>(provid
       );
     },
     episodes(animeId: string, options?: EpisodesOptions) {
-      const key = streamCacheKey("episodes", [animeId, hintsKey(options?.searchHints)]);
+      const malKey = options?.malId && options.malId > 0 ? String(options.malId) : "none";
+      const key = streamCacheKey("episodes", [animeId, hintsKey(options?.searchHints), malKey]);
       return getOrSetCached(key, STREAM_CACHE_TTL.episodes, () => provider.episodes(animeId, options)).then(
         (entry) => entry.value,
       );
