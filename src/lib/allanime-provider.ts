@@ -449,10 +449,12 @@ export const allanimeProvider = {
         title: `Episode ${number}`,
       }));
 
-    showEpisodesCache.set(showId, {
-      episodes,
-      expires: Date.now() + SHOW_EPISODES_CACHE_TTL_MS,
-    });
+    if (episodes.length > 0) {
+      showEpisodesCache.set(showId, {
+        episodes,
+        expires: Date.now() + SHOW_EPISODES_CACHE_TTL_MS,
+      });
+    }
 
     if (process.env.NODE_ENV !== "production") {
       console.info("[allanime-episodes]", { showId, episodeListLength: episodes.length });

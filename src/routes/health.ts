@@ -7,7 +7,7 @@ import {
 import { probeAllAnimeSearch } from "../lib/allanime-provider";
 import { isDeployedRuntime } from "../lib/deploy-env";
 
-const API_REVISION = "2026-06-19-episode-post";
+const API_REVISION = "2026-06-19-episode-cache";
 
 export const healthRouter = Router();
 
