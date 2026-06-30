@@ -9,6 +9,7 @@ import {
   mergeProviderEpisodeTitles,
   pickBestConsumetMatch,
 } from "./episode-title-utils";
+import { incrementMetric } from "./metrics/runtime-metrics";
 import {
   consumetAdapters,
   EPISODES_TIMEOUT_MS,
@@ -254,7 +255,11 @@ async function searchConsumetChain(query: string): Promise<ProviderAnime[]> {
 }
 
 async function searchAllAnime(query: string): Promise<ProviderAnime[]> {
-  const allanimeResults = await withTimeout(allanimeProvider.search(query), "AllAnime search", 12_000);
+  const allanimeResults = await withTimeout(
+    allanimeProvider.search(query),
+    "AllAnime search",
+    25_000,
+  );
   return allanimeResults.results
     .map((item) => ({
       item,
@@ -304,6 +309,7 @@ export const consumetMultiProvider = {
       const shouldEnrichTitles = titlesAreGeneric && Boolean(showName || options?.malId);
 
       if (shouldEnrichTitles) {
+        incrementMetric("enrichmentRuns");
         console.log("[enrichment]", {
           animeId: showId,
           status: "started",

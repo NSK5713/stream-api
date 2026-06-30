@@ -7,11 +7,12 @@ import type {
   StreamCategory,
 } from "./provider";
 import { fetchHianimeProviderSkip, skipTimesFromPayload, type ProviderSkipTimes } from "./provider-skip";
+import { fetchAllHianimeEpisodes } from "./hianime-episodes";
 
 export const PROVIDER_TIMEOUT_MS = 28_000;
 export const SEARCH_TIMEOUT_MS = 10_000;
 export const EPISODES_TIMEOUT_MS = 18_000;
-export const SOURCES_TIMEOUT_MS = 32_000;
+export const SOURCES_TIMEOUT_MS = 55_000;
 
 export function withTimeout<T>(
   promise: Promise<T>,
@@ -188,9 +189,9 @@ function createHianimeAdapter(): ConsumetProviderAdapter {
       };
     },
     async episodes(animeId) {
-      const info = await withTimeout(client.fetchAnimeInfo(animeId), "HiAnime anime info");
+      const episodes = await withTimeout(fetchAllHianimeEpisodes(animeId), "HiAnime episodes");
       return {
-        episodes: (info.episodes ?? []).map((episode) => ({
+        episodes: episodes.map((episode) => ({
           id: prefixProviderId("hianime", episode.id),
           number: episode.number,
           title: episode.title ?? `Episode ${episode.number}`,

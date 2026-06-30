@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { StreamCategory } from "../lib/provider";
 import { setHttpCacheControl, STREAM_CACHE_TTL } from "../lib/kv-cache";
+import { incrementMetric } from "../lib/metrics/runtime-metrics";
 import {
   toAnimeId,
   toEpisodeId,
@@ -58,9 +59,15 @@ animeRouter.get("/info", async (req, res) => {
       : [];
   const malId = Number(req.query.malId);
   const resolvedMalId = Number.isFinite(malId) && malId > 0 ? malId : undefined;
+  const posterUrl = String(req.query.posterUrl ?? "").trim() || undefined;
+
+  incrementMetric("animeInfoRequests");
 
   try {
-    const result = await getAnimeInfo(animeId, searchHints, resolvedMalId);
+    const result = await getAnimeInfo(animeId, searchHints, {
+      malId: resolvedMalId,
+      posterUrl,
+    });
     logEpisodeResolution({
       incomingAnimeId: rawId,
       resolvedProviderAnime: { id: animeId },
@@ -124,6 +131,8 @@ animeRouter.get("/:id", async (req, res) => {
     res.status(400).json({ error: `Invalid anime id format: ${rawId}` });
     return;
   }
+
+  incrementMetric("animeInfoRequests");
 
   try {
     const result = await getAnimeInfo(animeId);

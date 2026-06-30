@@ -2,18 +2,23 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import http from "http";
+import * as Sentry from "@sentry/node";
 
 import { animeRouter } from "./routes/anime";
 import { streamRouter } from "./routes/stream";
 import { healthRouter } from "./routes/health";
 import { metricsRouter } from "./routes/metrics";
+import { adminRouter } from "./routes/admin";
 import { proxyRouter } from "./routes/proxy";
 import { skipTimesRouter } from "./routes/skipTimes";
 import { libraryRouter } from "./routes/library";
 import { anilistRouter } from "./routes/anilist";
 import { isDeployedRuntime, NSKANIME_ORIGINS } from "./lib/deploy-env";
+import { initSentry, isSentryEnabled } from "./lib/sentry";
+import { incrementMetric } from "./lib/metrics/runtime-metrics";
 
 dotenv.config();
+initSentry();
 
 function parseAllowedOrigins(): string[] {
   const raw = process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || "";
@@ -36,6 +41,7 @@ const app = express();
 app.use(
   cors({
     origin: allowedOrigins.length ? allowedOrigins : true,
+    allowedHeaders: ["Content-Type", "Authorization", "x-admin-token"],
   }),
 );
 app.use(express.json());
@@ -47,6 +53,7 @@ app.use("/api/anime", animeRouter);
 app.use("/api/stream", streamRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/metrics", metricsRouter);
+app.use("/api/admin", adminRouter);
 app.use("/api/proxy", proxyRouter);
 app.use("/api/skip-times", skipTimesRouter);
 app.use("/api/library", libraryRouter);
@@ -61,6 +68,18 @@ app.get("/", (_req, res) => {
     service: "NSKAnime Stream API",
     status: "running",
   });
+});
+
+if (isSentryEnabled()) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  incrementMetric("apiErrors");
+  console.error("[API error]", err.message);
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // -----------------------------

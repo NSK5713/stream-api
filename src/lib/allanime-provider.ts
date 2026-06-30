@@ -1,6 +1,33 @@
 import crypto from "node:crypto";
 import type { EpisodeSourcesResponse } from "./provider";
 import { isDeployedRuntime } from "./deploy-env";
+import { isAdHeavyEmbedUrl } from "./ad-embed-domains";
+import { isEdgeProxyBlockedPlaybackUrl } from "./proxy-allowlist";
+
+export type AllAnimeProviderConfig = {
+  apiUrl?: string;
+  fetchUrl?: string;
+  relayToken?: string;
+};
+
+let providerConfig: AllAnimeProviderConfig = {};
+
+/** Runtime config for Workers (env bindings) and optional Node overrides. */
+export function configureAllAnimeProvider(config: AllAnimeProviderConfig): void {
+  providerConfig = { ...providerConfig, ...config };
+}
+
+function readNodeEnv(name: string): string | undefined {
+  if (typeof process === "undefined") return undefined;
+  const value = process.env?.[name];
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
+function configuredValue(key: keyof AllAnimeProviderConfig, nodeEnvName: string): string | undefined {
+  const fromConfig = providerConfig[key]?.trim();
+  if (fromConfig) return fromConfig;
+  return readNodeEnv(nodeEnvName);
+}
 
 const ALLANIME_REFERER = "https://youtu-chan.com";
 const ALLANIME_ORIGIN = "https://allanime.day";
@@ -8,24 +35,56 @@ const ALLANIME_BASE = "https://allanime.day";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const ALLANIME_KEY = crypto.createHash("sha256").update("Xot36i3lK3:v1").digest();
-const ALLANIME_FETCH_TIMEOUT_MS = 22_000;
+const ALLANIME_FETCH_TIMEOUT_MS = 10_000;
+const DIRECT_MIRROR_TIMEOUT_MS = 4_000;
+const CLOCK_MIRROR_TIMEOUT_MS = 6_000;
+const EMBED_EXTRACT_TIMEOUT_MS = 8_000;
+const FAST_MIRROR_PROBE_COUNT = 2;
+const MIRROR_RESOLVE_TIMEOUT_MS = 6_000;
+const MIRROR_PROBE_BATCH_SIZE = 4;
 
-const PRODUCTION_ALLANIME_RELAY = "https://nskanime.uk/allanime-api";
-const PRODUCTION_FETCH_RELAY = "https://nskanime.uk/allanime-fetch";
+const PRODUCTION_ALLANIME_RELAY = "https://nskanime.uk/r/v1/gql";
+const PRODUCTION_ALLANIME_RELAY_FALLBACK = "https://nskanime.uk/allanime-api";
+const PRODUCTION_ALLANIME_RELAY_WORKERS_DEV = "https://nskanime.nskanime.workers.dev/r/v1/gql";
+const PRODUCTION_FETCH_RELAY = "https://nskanime.uk/r/v1/fetch";
+const PRODUCTION_FETCH_RELAY_FALLBACK = "https://nskanime.uk/allanime-fetch";
+const PRODUCTION_FETCH_RELAY_WORKERS_DEV = "https://nskanime.nskanime.workers.dev/r/v1/fetch";
 const DIRECT_ALLANIME_API = "https://api.allanime.day/api";
 
 function resolveAllAnimeApiCandidates(): string[] {
-  const configured = process.env.ALLANIME_API_URL?.trim()?.replace(/\/$/, "") ?? "";
+  const configured =
+    configuredValue("apiUrl", "ALLANIME_API_URL")?.replace(/\/$/, "") ?? "";
   const workersDev = process.env.ALLANIME_WORKERS_DEV_URL?.trim()?.replace(/\/$/, "") ?? "";
+  const usesRelay =
+    configured.includes("/allanime-api") ||
+    configured.includes("/r/v1/gql") ||
+    configured.includes("workers.dev");
   const candidates: string[] = [];
+
+  if (configured) {
+    if (usesRelay) {
+      return [configured];
+    }
+    candidates.push(configured);
+  }
 
   // Railway/datacenter egress is blocked by AllAnime — relay must win on deployed runtimes.
   if (isDeployedRuntime()) {
-    candidates.push(PRODUCTION_ALLANIME_RELAY);
+    candidates.push(
+      PRODUCTION_ALLANIME_RELAY,
+      PRODUCTION_ALLANIME_RELAY_FALLBACK,
+      PRODUCTION_ALLANIME_RELAY_WORKERS_DEV,
+    );
     if (workersDev) candidates.push(workersDev);
-    if (configured && configured !== DIRECT_ALLANIME_API && configured !== PRODUCTION_ALLANIME_RELAY) {
-      candidates.push(configured);
+    if (
+      configured &&
+      configured !== DIRECT_ALLANIME_API &&
+      configured !== PRODUCTION_ALLANIME_RELAY &&
+      configured !== PRODUCTION_ALLANIME_RELAY_FALLBACK
+    ) {
+      // already pushed when not relay-only
     }
+    candidates.push(DIRECT_ALLANIME_API);
     return [...new Set(candidates.filter(Boolean))];
   }
 
@@ -43,7 +102,7 @@ async function fetchAllAnimeApi(init: RequestInit): Promise<Response> {
     try {
       const response = await fetchAllAnime(apiUrl, init);
       if (response.ok) return response;
-      if ([403, 429, 502, 503, 504].includes(response.status)) {
+      if ([401, 403, 429, 502, 503, 504].includes(response.status)) {
         lastResponse = response;
         continue;
       }
@@ -57,10 +116,30 @@ async function fetchAllAnimeApi(init: RequestInit): Promise<Response> {
   throw lastError instanceof Error ? lastError : new Error("AllAnime request failed");
 }
 
-function resolveFetchRelayUrl(): string {
-  const configured = process.env.ALLANIME_FETCH_RELAY_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
-  return PRODUCTION_FETCH_RELAY;
+function resolveFetchRelayCandidates(): string[] {
+  const configured =
+    configuredValue("fetchUrl", "ALLANIME_FETCH_RELAY_URL")?.replace(/\/$/, "") ??
+    configuredValue("fetchUrl", "ALLANIME_FETCH_URL")?.replace(/\/$/, "") ??
+    "";
+  if (configured) return [configured];
+
+  if (isDeployedRuntime()) {
+    return [
+      ...new Set([
+        PRODUCTION_FETCH_RELAY,
+        PRODUCTION_FETCH_RELAY_FALLBACK,
+        PRODUCTION_FETCH_RELAY_WORKERS_DEV,
+      ]),
+    ];
+  }
+
+  return [PRODUCTION_FETCH_RELAY];
+}
+
+function allAnimeRelayHeaders(): Record<string, string> {
+  const token = configuredValue("relayToken", "ALLANIME_RELAY_TOKEN");
+  if (!token) return {};
+  return { "x-allanime-relay-token": token };
 }
 
 function shouldUseFetchRelay(): boolean {
@@ -70,10 +149,24 @@ function shouldUseFetchRelay(): boolean {
 
 async function fetchForAllAnime(targetUrl: string, accept = "*/*"): Promise<Response> {
   if (shouldUseFetchRelay()) {
-    const relayUrl = `${resolveFetchRelayUrl()}?url=${encodeURIComponent(targetUrl)}`;
-    return fetchAllAnime(relayUrl, {
-      headers: buildAllAnimeHeaders({ Accept: accept }),
-    });
+    let lastError: unknown = null;
+    for (const relayBase of resolveFetchRelayCandidates()) {
+      try {
+        const relayUrl = `${relayBase}?url=${encodeURIComponent(targetUrl)}`;
+        const response = await fetchAllAnime(relayUrl, {
+          headers: {
+            ...buildAllAnimeHeaders({ Accept: accept }),
+            ...allAnimeRelayHeaders(),
+          },
+        });
+        if (response.ok) return response;
+        if ([403, 429, 502, 503, 504].includes(response.status)) continue;
+        return response;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("AllAnime fetch relay failed");
   }
 
   return fetchAllAnime(targetUrl, {
@@ -87,7 +180,7 @@ async function fetchForAllAnime(targetUrl: string, accept = "*/*"): Promise<Resp
 }
 
 function resolveAllAnimeApiUrl(): string {
-  const configured = process.env.ALLANIME_API_URL?.trim();
+  const configured = configuredValue("apiUrl", "ALLANIME_API_URL");
   if (configured) return configured.replace(/\/$/, "");
 
   if (isDeployedRuntime()) {
@@ -105,9 +198,9 @@ function buildAllAnimeHeaders(extra?: Record<string, string>): Record<string, st
     ...extra,
   };
 
-  const relayToken = process.env.ALLANIME_RELAY_TOKEN?.trim();
+  const relayToken = configuredValue("relayToken", "ALLANIME_RELAY_TOKEN");
   if (relayToken) {
-    headers["X-AllAnime-Relay-Token"] = relayToken;
+    headers["x-allanime-relay-token"] = relayToken;
   }
 
   return headers;
@@ -212,7 +305,21 @@ function normalizeTobeparsed(value: unknown): unknown {
   return normalized;
 }
 
-async function allAnimeGql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+function unwrapAllAnimeGqlData(normalized: Record<string, unknown>): Record<string, unknown> {
+  let layer = (normalized.data ?? normalized) as Record<string, unknown>;
+  if (layer.data && typeof layer.data === "object" && !Array.isArray(layer.data)) {
+    const inner = layer.data as Record<string, unknown>;
+    if (inner.show || inner.shows || inner.episode) {
+      layer = inner;
+    }
+  }
+  return layer;
+}
+
+async function allAnimeGql<T extends Record<string, unknown>>(
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
   const response = await fetchAllAnimeApi({
     method: "POST",
     headers: buildAllAnimeHeaders({ "Content-Type": "application/json" }),
@@ -225,8 +332,7 @@ async function allAnimeGql<T>(query: string, variables: Record<string, unknown>)
 
   const json = (await response.json()) as unknown;
   const normalized = normalizeTobeparsed(json) as Record<string, unknown>;
-  const data = (normalized.data ?? normalized) as T;
-  return { data } as T;
+  return unwrapAllAnimeGqlData(normalized) as T;
 }
 
 type EpisodePayload = { episode?: { sourceUrls?: AllAnimeEpisodeSource[] } };
@@ -257,8 +363,7 @@ async function fetchEpisodePayload(
 
   const json = (await response.json()) as unknown;
   const normalized = normalizeTobeparsed(json) as Record<string, unknown>;
-  const payload = (normalized.data ?? normalized) as EpisodePayload;
-  return payload;
+  return unwrapAllAnimeGqlData(normalized) as EpisodePayload;
 }
 
 async function getEpisodePayload(
@@ -268,11 +373,35 @@ async function getEpisodePayload(
 ): Promise<EpisodePayload> {
   const cacheKey = `${showId}:${translationType}:${episodeStringValue}`;
   const cached = episodePayloadCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.payload;
+  if (cached && cached.expires > Date.now()) {
+    const cachedSources = cached.payload.episode?.sourceUrls ?? [];
+    if (cachedSources.length > 0) return cached.payload;
+  }
 
-  const payload = await fetchEpisodePayload(showId, translationType, episodeStringValue);
-  episodePayloadCache.set(cacheKey, { payload, expires: Date.now() + EPISODE_PAYLOAD_CACHE_TTL_MS });
-  return payload;
+  let lastPayload: EpisodePayload = { episode: undefined };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const payload = await fetchEpisodePayload(showId, translationType, episodeStringValue);
+      lastPayload = payload;
+      const sourceUrls = payload.episode?.sourceUrls ?? [];
+      if (sourceUrls.length > 0) {
+        episodePayloadCache.set(cacheKey, {
+          payload,
+          expires: Date.now() + EPISODE_PAYLOAD_CACHE_TTL_MS,
+        });
+        return payload;
+      }
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 300));
+  }
+
+  episodePayloadCache.set(cacheKey, {
+    payload: lastPayload,
+    expires: Date.now() + EPISODE_PAYLOAD_CACHE_TTL_MS,
+  });
+  return lastPayload;
 }
 
 function mapMode(category: string): "sub" | "dub" | "raw" {
@@ -291,11 +420,116 @@ function sortSourcesByPreference(sources: AllAnimeEpisodeSource[]): AllAnimeEpis
   });
 }
 
+function isIframeSource(source: AllAnimeEpisodeSource): boolean {
+  if (decodeProviderPath(source.sourceUrl ?? "")) return false;
+  if (source.type === "iframe" && !decodeProviderPath(source.sourceUrl ?? "")) {
+    return true;
+  }
+  const providerUrl = resolveProviderUrl(source.sourceUrl ?? "");
+  if (!providerUrl.startsWith("http") || providerUrl.includes("allanime.day")) return false;
+  if (source.type === "iframe") return true;
+  if (/\/e\/[A-Za-z0-9_-]+/.test(providerUrl)) return true;
+  return false;
+}
+
+function isAdHeavyEmbedSource(source: AllAnimeEpisodeSource): boolean {
+  return isAdHeavyEmbedUrl(resolveProviderUrl(source.sourceUrl ?? ""));
+}
+
+function classifyPlaybackSource(url: string): EpisodeSourcesResponse["sources"][0] | null {
+  if (isAdHeavyEmbedUrl(url)) return null;
+
+  const isHls = url.includes(".m3u8");
+  const isDirectMedia =
+    /\.(m3u8|mp4)(\?|#|$)/i.test(url) || url.includes("tools.fast4speed.rsvp/");
+  if (isDirectMedia) {
+    return { url, type: isHls ? "hls" : "mp4", isM3U8: isHls };
+  }
+
+  if (isEdgeProxyBlockedPlaybackUrl(url)) return null;
+  return { url, type: "iframe" };
+}
+
+function resolveIframeSource(source: AllAnimeEpisodeSource): EpisodeSourcesResponse | null {
+  const rawUrl = source.sourceUrl ?? "";
+  if (decodeProviderPath(rawUrl)) return null;
+
+  const embedUrl = resolveProviderUrl(rawUrl);
+  if (!embedUrl.startsWith("http") || embedUrl.includes("allanime.day")) return null;
+
+  const playback = classifyPlaybackSource(embedUrl);
+  if (!playback) return null;
+
+  return {
+    sources: [playback],
+    headers: { Referer: ALLANIME_REFERER },
+  };
+}
+
 function isDirectSource(source: AllAnimeEpisodeSource, providerUrl: string): boolean {
   if (source.type === "iframe") return false;
   if (source.type === "player" || source.fallBack === "mp4") return true;
   if (decodeProviderPath(source.sourceUrl ?? "")) return false;
   return providerUrl.startsWith("http") && !providerUrl.includes("allanime.day");
+}
+
+function decodeJsonUrl(value: string): string {
+  return value.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+}
+
+function extractSourcesFromEmbedHtml(html: string, embedUrl: string): EpisodeSourcesResponse | null {
+  const referer = html.match(/"Referer":"([^"]*)"/)?.[1] ?? ALLANIME_REFERER;
+
+  const hlsMatch =
+    html.match(/"hls","url":"([^"]+)"/) ??
+    html.match(/"file"\s*:\s*"([^"]+\.m3u8[^"]*)"/i) ??
+    html.match(/"url"\s*:\s*"([^"]+\.m3u8[^"]*)"/i);
+  if (hlsMatch?.[1]) {
+    return {
+      sources: [{ url: decodeJsonUrl(hlsMatch[1]), type: "hls", isM3U8: true }],
+      headers: { Referer: referer },
+    };
+  }
+
+  const mp4Match =
+    html.match(/"link":"([^"]+)".*"resolutionStr":"([^"]+)"/) ??
+    html.match(/"file"\s*:\s*"([^"]+\.mp4[^"]*)"/i) ??
+    html.match(/"sources"\s*:\s*\[\s*\{\s*"file"\s*:\s*"([^"]+\.mp4[^"]*)"/i);
+  if (mp4Match?.[1]) {
+    return {
+      sources: [{
+        url: decodeJsonUrl(mp4Match[1]),
+        type: "mp4",
+        quality: mp4Match[2],
+      }],
+      headers: { Referer: referer },
+    };
+  }
+
+  const escapedM3u8 = html.match(/https?:\\\/\\\/[^"\\]+\.m3u8[^"\\]*/i);
+  if (escapedM3u8?.[0]) {
+    return {
+      sources: [{ url: decodeJsonUrl(escapedM3u8[0]), type: "hls", isM3U8: true }],
+      headers: { Referer: referer },
+    };
+  }
+
+  const directM3u8 = html.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
+  if (directM3u8?.[0]) {
+    return {
+      sources: [{ url: directM3u8[0], type: "hls", isM3U8: true }],
+      headers: { Referer: referer },
+    };
+  }
+
+  if (embedUrl.includes(".m3u8")) {
+    return {
+      sources: [{ url: embedUrl, type: "hls", isM3U8: true }],
+      headers: { Referer: referer },
+    };
+  }
+
+  return null;
 }
 
 function slugifyServer(name: string): string {
@@ -358,40 +592,58 @@ async function fetchClockJson(url: string): Promise<ClockResponse> {
 }
 
 async function resolveEmbedSources(embedUrl: string): Promise<EpisodeSourcesResponse> {
-  const response = await fetchForAllAnime(embedUrl, "text/html,application/xhtml+xml,*/*");
-  if (!response.ok) throw new Error(`AllAnime embed fetch failed: ${response.status}`);
-
-  const html = await response.text();
-  const referer = html.match(/"Referer":"([^"]*)"/)?.[1] ?? ALLANIME_REFERER;
-  const hlsMatch = html.match(/"hls","url":"([^"]+)"/);
-  if (hlsMatch?.[1]) {
-    return {
-      sources: [{ url: hlsMatch[1].replace(/\\u0026/g, "&"), type: "hls", isM3U8: true }],
-      headers: { Referer: referer },
-    };
+  let response: Response;
+  try {
+    response = await fetchForAllAnime(embedUrl, "text/html,application/xhtml+xml,*/*");
+  } catch {
+    throw new Error("AllAnime embed fetch failed.");
   }
 
-  const mp4Match = html.match(/"link":"([^"]+)".*"resolutionStr":"([^"]+)"/);
-  if (mp4Match?.[1]) {
-    return {
-      sources: [{ url: mp4Match[1].replace(/\\u0026/g, "&"), type: "mp4", quality: mp4Match[2] }],
-      headers: { Referer: referer },
-    };
+  if (!response.ok) {
+    throw new Error(`AllAnime embed fetch failed: ${response.status}`);
   }
+
+  const html = await response.text().catch(() => "");
+  const extracted = extractSourcesFromEmbedHtml(html, embedUrl);
+  if (extracted) return extracted;
 
   throw new Error("No playable AllAnime embed source found.");
+}
+
+function shouldRejectResolvedPlaybackUrl(url: string): boolean {
+  return isAdHeavyEmbedUrl(url);
 }
 
 async function resolveSourceWithTimeout(
   source: AllAnimeEpisodeSource,
   timeoutMs: number,
 ): Promise<EpisodeSourcesResponse> {
-  return Promise.race([
+  const resolved = await Promise.race([
     resolveSourceDescriptor(source),
     new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error(`AllAnime mirror "${source.sourceName ?? "unknown"}" timed out`)), timeoutMs);
     }),
   ]);
+
+  const playback = resolved.sources[0];
+  const playbackUrl = playback?.url;
+  if (!playback || !playbackUrl) {
+    throw new Error(`AllAnime mirror "${source.sourceName ?? "unknown"}" returned no playback URL`);
+  }
+
+  if (playback.type === "iframe") {
+    const reclassified = classifyPlaybackSource(playbackUrl);
+    if (reclassified && reclassified.type !== "iframe") {
+      return { ...resolved, sources: [reclassified] };
+    }
+    throw new Error(`AllAnime mirror "${source.sourceName ?? "unknown"}" returned iframe-only source`);
+  }
+
+  if (shouldRejectResolvedPlaybackUrl(playbackUrl)) {
+    throw new Error(`AllAnime mirror "${source.sourceName ?? "unknown"}" blocked from edge proxy`);
+  }
+
+  return resolved;
 }
 
 async function resolveSourceDescriptor(source: AllAnimeEpisodeSource): Promise<EpisodeSourcesResponse> {
@@ -409,7 +661,9 @@ async function resolveSourceDescriptor(source: AllAnimeEpisodeSource): Promise<E
   if (decodeProviderPath(rawUrl)) {
     const clock = await fetchClockJson(providerUrl);
     const links = clock.links ?? [];
-    if (!links.length) throw new Error("AllAnime clock returned no links.");
+    if (!links.length) {
+      throw new Error("AllAnime clock returned no links.");
+    }
 
     const sortedByResolution = [...links].sort(
       (a, b) => Number(b.resolutionStr?.replace(/\D/g, "") ?? 0) - Number(a.resolutionStr?.replace(/\D/g, "") ?? 0),
@@ -421,7 +675,9 @@ async function resolveSourceDescriptor(source: AllAnimeEpisodeSource): Promise<E
       sortedByResolution.find((link) => link.hls || link.link?.includes(".m3u8")) ??
       sortedByResolution[0];
 
-    if (!best?.link) throw new Error("AllAnime clock link missing.");
+    if (!best?.link) {
+      throw new Error("AllAnime clock link missing.");
+    }
 
     const isHls = Boolean(best.hls || best.link.includes(".m3u8"));
     return {
@@ -433,9 +689,47 @@ async function resolveSourceDescriptor(source: AllAnimeEpisodeSource): Promise<E
   return resolveEmbedSources(providerUrl);
 }
 
+async function resolveSourcesFromMirrors(
+  tryOrder: AllAnimeEpisodeSource[],
+  adHeavyTail: AllAnimeEpisodeSource[],
+): Promise<EpisodeSourcesResponse> {
+  const allSources = [...tryOrder, ...adHeavyTail];
+  let iframeFallback: EpisodeSourcesResponse | null = null;
+  let lastError: unknown;
+
+  for (let index = 0; index < allSources.length; index += MIRROR_PROBE_BATCH_SIZE) {
+    const batch = allSources.slice(index, index + MIRROR_PROBE_BATCH_SIZE);
+    const settled = await Promise.allSettled(
+      batch.map((source) => resolveSourceWithTimeout(source, MIRROR_RESOLVE_TIMEOUT_MS)),
+    );
+
+    for (let batchIndex = 0; batchIndex < settled.length; batchIndex += 1) {
+      const outcome = settled[batchIndex];
+      const source = batch[batchIndex];
+      if (outcome.status === "fulfilled") {
+        return outcome.value;
+      }
+
+      lastError = outcome.reason;
+      const iframe = resolveIframeSource(source);
+      if (iframe && !iframeFallback) {
+        iframeFallback = iframe;
+      }
+    }
+
+    // Prefer a clean iframe after non-ad-heavy mirrors are exhausted.
+    if (iframeFallback && index + MIRROR_PROBE_BATCH_SIZE >= tryOrder.length) {
+      return iframeFallback;
+    }
+  }
+
+  if (iframeFallback) return iframeFallback;
+  throw lastError instanceof Error ? lastError : new Error("AllAnime sources unavailable.");
+}
+
 export const allanimeProvider = {
   async search(query: string) {
-    const data = await allAnimeGql<{ data?: { shows?: { edges?: AllAnimeShowEdge[] } } }>(
+    const data = await allAnimeGql<{ shows?: { edges?: AllAnimeShowEdge[] } }>(
       `query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
         shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
           edges { _id name availableEpisodes __typename }
@@ -450,7 +744,7 @@ export const allanimeProvider = {
       },
     );
 
-    const results = (data.data?.shows?.edges ?? []).map((edge) => ({
+    const results = (data.shows?.edges ?? []).map((edge) => ({
       id: edge._id,
       title: edge.name,
       releaseYear: undefined,
@@ -460,11 +754,11 @@ export const allanimeProvider = {
   },
 
   async getShowName(showId: string): Promise<string | null> {
-    const data = await allAnimeGql<{ data?: { show?: { name?: string } } }>(
+    const data = await allAnimeGql<{ show?: { name?: string } }>(
       `query($showId: String!) { show(_id: $showId) { name } }`,
       { showId },
     );
-    return data.data?.show?.name ?? null;
+    return data.show?.name ?? null;
   },
 
   async episodes(showId: string) {
@@ -473,12 +767,12 @@ export const allanimeProvider = {
       return { episodes: cached.episodes };
     }
 
-    const data = await allAnimeGql<{ data?: { show?: { availableEpisodesDetail?: Record<string, string[]> } } }>(
+    const data = await allAnimeGql<{ show?: { availableEpisodesDetail?: Record<string, string[]> } }>(
       `query($showId: String!) { show(_id: $showId) { _id availableEpisodesDetail }}`,
       { showId },
     );
 
-    const detail = data.data?.show?.availableEpisodesDetail ?? {};
+    const detail = data.show?.availableEpisodesDetail ?? {};
     const episodeNumbers = new Set<number>();
     for (const bucket of Object.values(detail)) {
       for (const episodeStringValue of bucket) {
@@ -549,8 +843,8 @@ export const allanimeProvider = {
     }
 
     const ordered = [
-      ...(selectedByServer ? [selectedByServer] : []),
       ...directSources,
+      ...(selectedByServer ? [selectedByServer] : []),
       ...indirectSources,
       ...PREFERRED_PROVIDERS.map((name) => sourceUrls.find((item) => item.sourceName === name)).filter(
         (item): item is AllAnimeEpisodeSource => Boolean(item),
@@ -559,22 +853,22 @@ export const allanimeProvider = {
     ];
 
     const seen = new Set<string>();
-    let lastError: unknown;
+    const tryOrder: AllAnimeEpisodeSource[] = [];
+    const adHeavyTail: AllAnimeEpisodeSource[] = [];
 
     for (const source of ordered) {
       if (!source?.sourceUrl) continue;
       const key = `${source.sourceName}:${source.sourceUrl}`;
       if (seen.has(key)) continue;
       seen.add(key);
-
-      try {
-        return await resolveSourceWithTimeout(source, 12_000);
-      } catch (error) {
-        lastError = error;
+      if (isAdHeavyEmbedSource(source)) {
+        adHeavyTail.push(source);
+      } else {
+        tryOrder.push(source);
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error("AllAnime sources unavailable.");
+    return resolveSourcesFromMirrors(tryOrder, adHeavyTail);
   },
 };
 

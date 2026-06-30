@@ -1,6 +1,8 @@
 import { streamProvider, type StreamCategory } from "../lib/provider";
 import type { EpisodeSourcesResponse } from "../lib/provider";
 import type { EpisodeId } from "../types/episode";
+import { isAdHeavyEmbedUrl } from "../lib/ad-embed-domains";
+import { isEdgeProxyBlockedPlaybackUrl } from "../lib/proxy-allowlist";
 import { acquireLock, releaseLock } from "../lib/lock";
 import { canRequest, recordFailure, recordSuccess } from "../lib/circuitBreaker";
 import {
@@ -77,8 +79,8 @@ async function resolveStreamUncached(
       throw new StreamResolutionError("No servers available", 404);
     }
 
-    // AllAnime sources() already walks every mirror — one call is enough.
-    const serversToTry = isAllAnimeEpisodeId(episodeId) ? servers.slice(0, 1) : servers;
+    // AllAnime sources() races mirrors internally — try each default server id on empty payloads.
+    const serversToTry = isAllAnimeEpisodeId(episodeId) ? servers : servers;
 
     for (const server of serversToTry) {
       if (!canRequest(server.id)) {
@@ -160,21 +162,37 @@ async function resolveStreamUncached(
   }
 }
 
+function isUnplayableCachedPayload(payload: ResolvedStreamPayload): boolean {
+  const source = payload.sources[0];
+  if (!source?.url) return true;
+  if (source.type === "iframe") return isAdHeavyEmbedUrl(source.url);
+  return isEdgeProxyBlockedPlaybackUrl(source.url);
+}
+
 export async function resolveStreamV10(episodeId: EpisodeId, category: StreamCategory) {
   const cached = await getResolvedStreamCache(episodeId, category);
-  if (cached) {
+  if (cached && !isUnplayableCachedPayload(cached)) {
     recordCacheHit();
     return { ...cached, cached: true };
   }
 
   return dedupeStreamResolution(episodeId, category, async () => {
     const retry = await getResolvedStreamCache(episodeId, category);
-    if (retry) {
+    if (retry && !isUnplayableCachedPayload(retry)) {
       recordCacheHit();
       return { ...retry, cached: true };
     }
 
-    const output = await resolveStreamUncached(episodeId, category);
-    return output;
+    try {
+      return await resolveStreamUncached(episodeId, category);
+    } catch (firstError) {
+      // AllAnime mirrors can be briefly empty on relay — one quick retry before 404.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      try {
+        return await resolveStreamUncached(episodeId, category);
+      } catch {
+        throw firstError;
+      }
+    }
   });
 }
