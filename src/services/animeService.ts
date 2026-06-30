@@ -1,4 +1,5 @@
-import { streamProvider, type StreamCategory } from "../lib/provider";
+import { streamProvider, type ProviderEpisode, type StreamCategory } from "../lib/provider";
+import { enrichProviderEpisodeThumbnails } from "../lib/episodes/episode-thumbnails";
 import type { EpisodeId } from "../types/episode";
 
 type SafeProviderResponse = {
@@ -23,13 +24,31 @@ export async function searchAnime(query: string) {
 }
 
 /* ---------------- EPISODES ---------------- */
-export async function getAnimeInfo(animeId: string, searchHints: string[] = [], malId?: number) {
+export async function getAnimeInfo(
+  animeId: string,
+  searchHints: string[] = [],
+  options: { malId?: number; posterUrl?: string } = {},
+) {
   try {
-    const res = await streamProvider.episodes(animeId, { searchHints, malId });
-    const episodes = (res as any)?.episodes ?? (res as any)?.data ?? [];
+    const res = await streamProvider.episodes(animeId, {
+      searchHints,
+      malId: options.malId,
+    });
+    let episodes = ((res as { episodes?: ProviderEpisode[]; data?: ProviderEpisode[] })?.episodes ??
+      (res as { data?: ProviderEpisode[] })?.data ??
+      []) as ProviderEpisode[];
     const enriched = episodes.some(
-      (episode: { title?: string }) => episode.title && !/^Episode\s*\d+\s*$/i.test(episode.title.trim()),
+      (episode) => episode.title && !/^Episode\s*\d+\s*$/i.test(episode.title.trim()),
     );
+
+    if (episodes.length) {
+      episodes = await enrichProviderEpisodeThumbnails(episodes, {
+        malId: options.malId,
+        searchHints,
+        posterUrl: options.posterUrl,
+      });
+    }
+
     return { episodes, enriched };
   } catch (err) {
     console.error("getAnimeInfo error:", err);

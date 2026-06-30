@@ -77,6 +77,10 @@ export async function kvSetJson(key: string, value: unknown, ttlSeconds: number)
   return result === "OK";
 }
 
+export async function kvDel(key: string): Promise<void> {
+  await kvCommand(["DEL", key]);
+}
+
 export function streamCacheKey(kind: string, parts: string[]): string {
   const digest = createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32);
   return `${CACHE_PREFIX}${kind}:${digest}`;

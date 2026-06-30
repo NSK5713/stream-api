@@ -19,6 +19,7 @@ export type ProviderEpisode = {
   number: number;
   title: string;
   isFiller?: boolean;
+  thumbnail?: string;
 };
 
 export type EpisodeServer = {

@@ -9,6 +9,20 @@ export const PROXY_ALWAYS_ALLOWED_HOSTS = [
 ] as const;
 
 /**
+ * Hosts that must not be played as direct browser URLs (need Referer via /api/proxy).
+ * Keep in sync with `src/lib/streaming/proxyAllowlist.ts`.
+ */
+export const EDGE_PROXY_BLOCKED_PLAYBACK_HOSTS = [] as const;
+
+export function isEdgeProxyBlockedPlaybackUrl(url: string): boolean {
+  try {
+    return (EDGE_PROXY_BLOCKED_PLAYBACK_HOSTS as readonly string[]).includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Referer values allowed for third-party CDN URLs (prevents open-proxy abuse).
  * Keep in sync with `src/lib/streaming/proxyAllowlist.ts`.
  */
