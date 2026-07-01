@@ -13,6 +13,7 @@ import { proxyRouter } from "./routes/proxy";
 import { skipTimesRouter } from "./routes/skipTimes";
 import { libraryRouter } from "./routes/library";
 import { anilistRouter } from "./routes/anilist";
+import { homeRouter } from "./routes/home";
 import { isDeployedRuntime, NSKANIME_ORIGINS } from "./lib/deploy-env";
 import { initSentry, isSentryEnabled } from "./lib/sentry";
 import { incrementMetric } from "./lib/metrics/runtime-metrics";
@@ -58,6 +59,7 @@ app.use("/api/proxy", proxyRouter);
 app.use("/api/skip-times", skipTimesRouter);
 app.use("/api/library", libraryRouter);
 app.use("/api/anilist", anilistRouter);
+app.use("/api/home", homeRouter);
 
 // -----------------------------
 // BASIC ROOT
