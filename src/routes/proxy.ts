@@ -1,11 +1,25 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { Readable } from "node:stream";
 import { isAllowedProxyRequest } from "../lib/proxy-allowlist";
 import { rewriteM3u8Manifest } from "../lib/m3u8-rewrite";
 
 export const proxyRouter = Router();
 
-proxyRouter.get("/", async (req, res) => {
+const PROXY_UPSTREAM_TIMEOUT_MS = 45_000;
+const PROXY_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+function buildUpstreamHeaders(req: Request, referer: string, origin: string): HeadersInit {
+  return {
+    ...(referer ? { Referer: referer } : {}),
+    ...(origin ? { Origin: origin } : {}),
+    ...(req.headers.range ? { Range: String(req.headers.range) } : {}),
+    Accept: req.headers.accept ? String(req.headers.accept) : "*/*",
+    "User-Agent": PROXY_USER_AGENT,
+  };
+}
+
+async function proxyRequest(req: Request, res: Response) {
   const url = String(req.query.url ?? "");
   const referer = String(req.query.referer ?? "");
   const origin = String(req.query.origin ?? "");
@@ -22,15 +36,10 @@ proxyRouter.get("/", async (req, res) => {
 
   try {
     const upstream = await fetch(url, {
-      headers: {
-        ...(referer ? { Referer: referer } : {}),
-        ...(origin ? { Origin: origin } : {}),
-        ...(req.headers.range ? { Range: String(req.headers.range) } : {}),
-        Accept: req.headers.accept ? String(req.headers.accept) : "*/*",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
+      method: req.method === "HEAD" ? "HEAD" : "GET",
+      headers: buildUpstreamHeaders(req, referer, origin),
       redirect: "follow",
+      signal: AbortSignal.timeout(PROXY_UPSTREAM_TIMEOUT_MS),
     });
 
     res.status(upstream.status);
@@ -58,8 +67,9 @@ proxyRouter.get("/", async (req, res) => {
     }
 
     res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges");
+    res.setHeader("X-NSKAnime-Proxy-Source", "railway");
 
-    if (!upstream.body) {
+    if (req.method === "HEAD" || !upstream.body) {
       res.end();
       return;
     }
@@ -90,11 +100,35 @@ proxyRouter.get("/", async (req, res) => {
       return;
     }
 
-    const nodeStream = (Readable as { fromWeb?: (body: unknown) => Readable }).fromWeb
-      ? (Readable as { fromWeb: (body: unknown) => Readable }).fromWeb(upstream.body)
-      : Readable.from(upstream.body as AsyncIterable<Uint8Array>);
-    nodeStream.pipe(res);
+    try {
+      const nodeStream = (Readable as { fromWeb?: (body: unknown) => Readable }).fromWeb
+        ? (Readable as { fromWeb: (body: unknown) => Readable }).fromWeb(upstream.body)
+        : Readable.from(upstream.body as AsyncIterable<Uint8Array>);
+      nodeStream.on("error", (streamError) => {
+        if (!res.headersSent) {
+          res.status(502).json({
+            error: streamError instanceof Error ? streamError.message : "Proxy stream failed",
+          });
+          return;
+        }
+        res.destroy(streamError);
+      });
+      nodeStream.pipe(res);
+    } catch (streamError) {
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: streamError instanceof Error ? streamError.message : "Proxy stream failed",
+        });
+      }
+    }
   } catch (error) {
-    res.status(502).json({ error: error instanceof Error ? error.message : "Proxy failed" });
+    if (!res.headersSent) {
+      const message = error instanceof Error ? error.message : "Proxy failed";
+      const status = /timed out/i.test(message) ? 504 : 502;
+      res.status(status).json({ error: message });
+    }
   }
-});
+}
+
+proxyRouter.get("/", proxyRequest);
+proxyRouter.head("/", proxyRequest);
