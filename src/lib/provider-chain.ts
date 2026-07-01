@@ -255,21 +255,34 @@ async function searchConsumetChain(query: string): Promise<ProviderAnime[]> {
 }
 
 async function searchAllAnime(query: string): Promise<ProviderAnime[]> {
-  const allanimeResults = await withTimeout(
-    allanimeProvider.search(query),
-    "AllAnime search",
-    25_000,
-  );
-  return allanimeResults.results
-    .map((item) => ({
-      item,
-      score: scoreAllAnimeMatch(item.title, query),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .map(({ item }) => ({
-      ...item,
-      id: prefixAllAnimeId(item.id),
-    }));
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const allanimeResults = await withTimeout(
+        allanimeProvider.search(query),
+        "AllAnime search",
+        25_000,
+      );
+      return allanimeResults.results
+        .map((item) => ({
+          item,
+          score: scoreAllAnimeMatch(item.title, query),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .map(({ item }) => ({
+          ...item,
+          id: prefixAllAnimeId(item.id),
+        }));
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+  }
+
+  if (lastError) throw lastError;
+  return [];
 }
 
 export const consumetMultiProvider = {
